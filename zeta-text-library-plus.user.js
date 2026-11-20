@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.9
+// @version      0.2.0
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -31,6 +31,7 @@
     const searchCache=new Map();
     const PAGE_SIZE=24;
     let pageOffset=0,hasMore=false,loadingMore=false;
+    let displayedTab=null;
     let resizeCleanup=null;
     let overlay=null;
     let activeListeners=false;
@@ -72,7 +73,7 @@
       if(!overlay && activeField===null)return;
       resizingSlash=false;
       resizeCleanup?.();resizeCleanup=null;
-      pageOffset=0;hasMore=false;loadingMore=false;
+      pageOffset=0;hasMore=false;loadingMore=false;displayedTab=null;
       if(overlay){overlay.remove();overlay=null;}
       activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;
     }
@@ -180,14 +181,14 @@
           if(e.cancelable)e.preventDefault();
         });
               overlay.innerHTML='<style>'+
-        '#ztlp-slash{--bg:#292929;--head:#303030;--text:#f2f2f2;--muted:#aaa;--line:#505050;--hover:#393939;--selected:#f1f1f1;background:var(--bg);color:var(--text);border:1px solid var(--line)}'+
-        '#ztlp-slash[data-theme="light"]{--bg:#fff;--head:#f5f5f5;--text:#222;--muted:#707070;--line:#ddd;--hover:#efefef;--selected:#202020}'+
+        '#ztlp-slash{--bg:#202020;--head:#303030;--text:#f5f5f5;--muted:#bcbcbc;--line:#484848;--hover:#303030;--selected:#383838;--selected-text:#fff;background:var(--bg);color:var(--text);border:1px solid var(--line)}'+
+        '#ztlp-slash[data-theme="light"]{--bg:#fff;--head:#f5f5f5;--text:#222;--muted:#707070;--line:#ddd;--hover:#efefef;--selected:#e7e7e7;--selected-text:#202020}'+
         '#ztlp-slash *{box-sizing:border-box}'+
         '#ztlp-slash .ztlp-head{padding:9px 12px 5px;background:var(--head);font-weight:700}'+
-        '#ztlp-slash .ztlp-tabs{display:flex;overflow-x:auto;max-width:100%;background:var(--head);border-bottom:1px solid var(--line);scrollbar-width:none;-webkit-overflow-scrolling:touch}'+
+        '#ztlp-slash .ztlp-tabs{display:flex;gap:4px;padding:5px 7px;overflow-x:auto;max-width:100%;background:var(--head);border-bottom:1px solid var(--line);scrollbar-width:none;-webkit-overflow-scrolling:touch}'+
         '#ztlp-slash .ztlp-tabs::-webkit-scrollbar{display:none}'+
-        '#ztlp-slash [data-ztlp-tab]{border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);border-radius:0;padding:9px 13px;white-space:nowrap;flex-shrink:0;font:600 13px system-ui,sans-serif;touch-action:manipulation}'+
-        '#ztlp-slash [data-ztlp-tab][aria-selected="true"]{color:var(--text);border-bottom-color:var(--selected)}'+
+        '#ztlp-slash [data-ztlp-tab]{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:8px;padding:7px 12px;white-space:nowrap;flex-shrink:0;font:600 13px system-ui,sans-serif;touch-action:manipulation}'+
+        '#ztlp-slash [data-ztlp-tab][aria-selected="true"]{color:var(--selected-text);background:var(--selected);border-color:var(--line);font-weight:750}'+
         '#ztlp-slash [data-ztlp-tab]:focus-visible,#ztlp-slash [data-ztlp-id]:focus-visible{outline:2px solid var(--selected);outline-offset:-2px}'+
         '#ztlp-slash .ztlp-items{overflow-y:auto;min-height:0;flex:1;overscroll-behavior:contain;padding-bottom:5px}'+
         '#ztlp-slash .ztlp-tabs{flex:0 0 auto}'+
@@ -216,6 +217,15 @@
         tabHost.dataset.tabs=tabIds;
       }
       tabHost.querySelectorAll('[data-ztlp-tab]').forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.ztlpTab===selectedTab)));
+      if(displayedTab!==selectedTab){
+        displayedTab=selectedTab;
+        const current=[...tabHost.querySelectorAll('[data-ztlp-tab]')].find(tab=>tab.dataset.ztlpTab===selectedTab);
+        if(current){
+          const left=current.offsetLeft-tabHost.offsetLeft,right=left+current.offsetWidth;
+          if(left<tabHost.scrollLeft)tabHost.scrollLeft=Math.max(0,left-8);
+          else if(right>tabHost.scrollLeft+tabHost.clientWidth)tabHost.scrollLeft=right-tabHost.clientWidth+8;
+        }
+      }
       const list=overlay.querySelector('.ztlp-items');
       if(append){list.insertAdjacentHTML('beforeend',entries.map(slashRow).join(''));}
       else{list.innerHTML=entries.length?entries.map(slashRow).join(''):'<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>';list.scrollTop=0;}
@@ -412,7 +422,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.9';
+  const VERSION = '0.2.0';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
