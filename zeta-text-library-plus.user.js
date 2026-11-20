@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.2.2
+// @version      1.0.0
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -422,7 +422,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.2.2';
+  const VERSION = '1.0.0';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
