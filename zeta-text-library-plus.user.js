@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.1
+// @version      0.1.2
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -85,13 +85,13 @@
         '#ztlp-slash .ztlp-items{overflow-y:auto;max-height:min(245px,38dvh);overscroll-behavior:contain}'+
         '#ztlp-slash [data-ztlp-id]{border:0;border-radius:7px;display:block;width:100%;text-align:left;padding:9px 11px;margin:2px 0;background:transparent;color:var(--text);font:inherit;cursor:pointer;touch-action:manipulation}'+
         '#ztlp-slash [data-ztlp-id]:active,#ztlp-slash [data-ztlp-id]:hover{background:var(--hover)}'+
-        '#ztlp-slash .ztlp-path{display:block;color:var(--muted);font-size:12px}'+
+        '#ztlp-slash .ztlp-titleline{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:7px;row-gap:2px;overflow-wrap:anywhere}#ztlp-slash .ztlp-path{display:inline;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5}#ztlp-slash .ztlp-excerpt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:3em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:12px;margin-top:3px}'+
         '#ztlp-slash .ztlp-empty{padding:13px;color:var(--muted)}'+
-        '</style><div class="ztlp-head">텍스트 보관함+</div>'+
+        '</style>'+
         '<nav class="ztlp-tabs" role="tablist" aria-label="보관함 폴더">'+
         tabs.map(tab=>'<button type="button" role="tab" data-ztlp-tab="'+escapeHTML(tab.id)+'" aria-selected="'+(tab.id===selectedTab?'true':'false')+'">'+escapeHTML(tab.name)+'</button>').join('')+'</nav>'+
         '<div class="ztlp-items">'+
-        (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">'+escapeHTML(e.path)+'</small></button>').join(''):
+        (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><span class="ztlp-titleline"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">('+escapeHTML(e.path)+')</small></span><span class="ztlp-excerpt">'+escapeHTML(e.preview||'')+'</span></button>').join(''):
         '<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>')+'</div>';
     }
     function fetchSlashResults(el){
@@ -189,7 +189,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -359,7 +359,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
         }).slice(0,60).map(entry=>{
           const folder=data.folders.find(f=>f.id===entry.folderId);
           const parent=folder?.parentId?data.folders.find(f=>f.id===folder.parentId):null;
-          return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류'};
+          return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류',preview:String(entry.body||'').trim().replace(/\s+/g,' ').slice(0,160)};
         }):[];
         reply.ok=true;
       }else if(msg.kind==='get-text'&&typeof msg.id==='string'){
@@ -417,23 +417,30 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
     #grip{position:absolute;right:0;bottom:0;width:30px;height:30px;cursor:nwse-resize;touch-action:none;z-index:4;display:flex;align-items:flex-end;justify-content:flex-end;padding:5px;color:#7c8194;font-size:19px;line-height:1;user-select:none} #toast{position:absolute;bottom:47px;left:12px;right:12px;text-align:center;background:#303449;color:white;border-radius:8px;padding:8px;font-size:12px;pointer-events:none;display:none;z-index:6}
     .check{width:17px;height:17px;accent-color:#383d55;flex:none} .tiny{font-size:11px} .spacer{flex:1} .inline{display:flex;align-items:center;gap:5px;flex-wrap:wrap} .settingshint{line-height:1.6} .no-select{user-select:none}
     @media(max-width:420px){#content{padding:10px}#header{padding:10px} #footer{padding:9px} .entry{padding:9px}}
+
     :host([data-theme="dark"]) {color-scheme:dark}
-    :host([data-theme="dark"]) #panel {background:#1c1e27;color:#f0f1f7;border-color:#505365}
-    :host([data-theme="dark"]) #header {background:#252735;border-color:#434656}
-    :host([data-theme="dark"]) #footer {background:#1c1e27;border-color:#434656}
-    :host([data-theme="dark"]) .btn {background:#292c39;color:#eef0f8;border-color:#575b6d}
-    :host([data-theme="dark"]) .btn.active,:host([data-theme="dark"]) .btn.primary {background:#747da4;color:#fff;border-color:#747da4}
-    :host([data-theme="dark"]) .btn.danger {color:#ff9ba8}
-    :host([data-theme="dark"]) .actions .copy-main {background:#747da4;color:#fff;border-color:#949dc5}
-    :host([data-theme="dark"]) .entry {background:#242735;border-color:#4b5061}
-    :host([data-theme="dark"]) .preview {color:#d0d3df}
-    :host([data-theme="dark"]) .muted,:host([data-theme="dark"]) .empty {color:#aaafc3}
-    :host([data-theme="dark"]) .box {background:#282b39;border-color:#454a5b}
-    :host([data-theme="dark"]) .subline,:host([data-theme="dark"]) .folder-row {border-color:#454a5b}
-    :host([data-theme="dark"]) input[type=text],:host([data-theme="dark"]) input[type=search],:host([data-theme="dark"]) input[type=file],:host([data-theme="dark"]) textarea,:host([data-theme="dark"]) select {background:#252838;color:#f1f2f8;border-color:#5c6175}
-    :host([data-theme="dark"]) input::placeholder,:host([data-theme="dark"]) textarea::placeholder {color:#9da3b7}
-    :host([data-theme="dark"]) #grip {color:#adb4cf}
-    :host([data-theme="dark"]) .check {accent-color:#929ac3}
+    :host([data-theme="dark"]) #text-library-plus-launcher {background:#282828;color:#f3f3f3;border-color:#575757;box-shadow:0 3px 14px #0006}
+    :host([data-theme="dark"]) #panel {background:#202020;color:#f2f2f2;border-color:#505050}
+    :host([data-theme="dark"]) #header {background:#2b2b2b;border-color:#444}
+    :host([data-theme="dark"]) #footer {background:#202020;border-color:#444}
+    :host([data-theme="dark"]) .btn {background:#303030;color:#ededed;border-color:#585858}
+    :host([data-theme="dark"]) .btn.active,:host([data-theme="dark"]) .btn.primary {background:#626262;color:#fff;border-color:#777}
+    :host([data-theme="dark"]) .btn.danger {color:#e4a6a6}
+    :host([data-theme="dark"]) .actions .copy-main {background:#626262;color:#fff;border-color:#777}
+    :host([data-theme="dark"]) .entry {background:#292929;border-color:#4a4a4a}
+    :host([data-theme="dark"]) .preview {color:#c7c7c7}
+    :host([data-theme="dark"]) .muted,:host([data-theme="dark"]) .empty {color:#aaa}
+    :host([data-theme="dark"]) .box {background:#2b2b2b;border-color:#4c4c4c}
+    :host([data-theme="dark"]) .subline,:host([data-theme="dark"]) .folder-row {border-color:#4b4b4b}
+    :host([data-theme="dark"]) input[type=text],:host([data-theme="dark"]) input[type=search],:host([data-theme="dark"]) input[type=file],:host([data-theme="dark"]) textarea,:host([data-theme="dark"]) select {background:#292929;color:#f1f1f1;border-color:#5c5c5c}
+    :host([data-theme="dark"]) input::placeholder,:host([data-theme="dark"]) textarea::placeholder {color:#aaa}
+    :host([data-theme="dark"]) #grip {color:#aaa}
+    :host([data-theme="dark"]) #toast {background:#363636;color:#fff}
+    :host([data-theme="dark"]) .check {accent-color:#949494}
+    :host([data-theme="dark"]) .entry.drag-source {opacity:.5}
+    :host([data-theme="dark"]) .entry.drop-before {box-shadow:inset 0 3px 0 #b0b0b0}
+    :host([data-theme="dark"]) .entry.drop-after {box-shadow:inset 0 -3px 0 #b0b0b0}
+    :host([data-theme="dark"]) .entry.drag-group {outline-color:#b0b0b0}
   </style>
   <button type="button" id="text-library-plus-launcher" aria-label="텍스트 보관함+" title="텍스트 보관함+"></button>
   <section id="panel" hidden aria-label="제타 텍스트 보관함+">
