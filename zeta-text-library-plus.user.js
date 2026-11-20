@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.7
+// @version      0.1.8
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -370,7 +370,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.7';
+  const VERSION = '0.1.8';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -535,8 +535,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
           const folder=entry.folderId?data.folders.find(f=>f.id===entry.folderId):null;
           const root=folder?.parentId||folder?.id||null;
           if(reply.activeTab!=='all'&&root!==reply.activeTab)return false;
-          return !searchText || String(entry.title||'').toLocaleLowerCase().includes(searchText) ||
-            (folder?.name||'').toLocaleLowerCase().includes(searchText);
+          return !searchText || String(entry.title||'').toLocaleLowerCase().includes(searchText);
         }).slice(0,24).map(entry=>{
           const folder=data.folders.find(f=>f.id===entry.folderId);
           const parent=folder?.parentId?data.folders.find(f=>f.id===folder.parentId):null;
