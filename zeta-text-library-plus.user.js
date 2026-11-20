@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.6
+// @version      0.1.7
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -32,6 +32,26 @@
     let overlay=null;
     let activeListeners=false;
     let overlayTouchAt=0;
+    // Slash menu geometry is stored separately from the main vault popup.
+    const SLASH_SIZE_KEY='zeta-text-library-plus-slash-size-v1';
+    const sizeClamp=(n,min,max)=>Math.max(min,Math.min(max,n));
+    function parseSlashSize(value){
+      try{
+        const v=typeof value==='string'?JSON.parse(value):value;
+        if(!v||typeof v!=='object'||!Number.isFinite(v.width)||!Number.isFinite(v.height))return null;
+        return {width:sizeClamp(v.width,210,900),height:sizeClamp(v.height,150,900)};
+      }catch(_){return null;}
+    }
+    function loadSlashSize(){
+      try{return parseSlashSize(GM_getValue(SLASH_SIZE_KEY,null));}
+      catch(_){try{return parseSlashSize(localStorage.getItem(SLASH_SIZE_KEY));}catch(_){return null;}}
+    }
+    let slashSize=loadSlashSize(),resizingSlash=false;
+    function saveSlashSize(){
+      const serialized=JSON.stringify(slashSize);
+      try{GM_setValue(SLASH_SIZE_KEY,serialized);}
+      catch(_){try{localStorage.setItem(SLASH_SIZE_KEY,serialized);}catch(_){}}
+    }
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const isField=el=>el instanceof HTMLTextAreaElement && el.matches('textarea[name="message"]') && !el.disabled && !el.readOnly;
     function currentPosition(el){
@@ -47,6 +67,7 @@
       if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
       if(activeListeners){uninstallMenuListeners();activeListeners=false;}
       if(!overlay && activeField===null)return;
+      resizingSlash=false;
       if(overlay){overlay.remove();overlay=null;}
       activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;
     }
@@ -64,26 +85,86 @@
         window.parent.postMessage({protocol:PLUS_PROTO,requestId,kind,...data},parentOrigin,[ch.port2]);
       });
     }
+    function slashViewport(){
+      const vv=window.visualViewport;
+      return {width:Math.max(1,vv?.width||innerWidth),height:Math.max(1,vv?.height||innerHeight),
+        left:vv?.offsetLeft||0,top:vv?.offsetTop||0};
+    }
+    function slashBounds(){
+      const v=slashViewport();
+      const minWidth=Math.min(210,Math.max(1,v.width-16)),minHeight=Math.min(150,Math.max(1,v.height-16));
+      return {v,minWidth,minHeight,maxWidth:Math.max(minWidth,Math.min(900,v.width-16)),
+        maxHeight:Math.max(minHeight,Math.min(900,v.height-16))};
+    }
+    function layoutSlash(field){
+      if(!overlay||!field?.isConnected)return;
+      const {v,minWidth,minHeight,maxWidth,maxHeight}=slashBounds();
+      const box=field.getBoundingClientRect();
+      const width=sizeClamp(slashSize?.width??Math.min(400,box.width),minWidth,maxWidth);
+      const height=sizeClamp(slashSize?.height??Math.min(310,Math.max(minHeight,v.height*.55)),minHeight,maxHeight);
+      const left=sizeClamp(box.left,v.left+8,Math.max(v.left+8,v.left+v.width-width-8));
+      const below=box.bottom+5,above=box.top-height-5;
+      const top=(box.top>height+16 && above>=v.top+8)?above:
+        (below+height<=v.top+v.height-8?below:sizeClamp(box.top-height-5,v.top+8,
+          Math.max(v.top+8,v.top+v.height-height-8)));
+      overlay.style.width=width+'px';
+      overlay.style.height=height+'px';
+      overlay.style.left=left+'px';
+      overlay.style.top=sizeClamp(top,v.top+8,Math.max(v.top+8,v.top+v.height-height-8))+'px';
+      overlay.style.bottom='auto';overlay.style.right='auto';
+    }
+    function startSlashResize(event){
+      if(event.button!==undefined&&event.button!==0)return;
+      if(!overlay||!activeField?.isConnected)return;
+      event.preventDefault();event.stopPropagation();
+      resizingSlash=true;overlayTouchAt=Date.now();
+      // Ignore stale search results while a finger is dragging the size handle.
+      if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
+      requestSerial++;
+      const pointerId=event.pointerId;
+      const startX=event.clientX,startY=event.clientY;
+      const initial=overlay.getBoundingClientRect();
+      const width=initial.width,height=initial.height;
+      const grip=event.currentTarget;
+      try{grip.setPointerCapture(pointerId);}catch(_){}
+      function move(e){
+        if(e.pointerId!==pointerId)return;
+        e.preventDefault();overlayTouchAt=Date.now();
+        const {minWidth,minHeight,maxWidth,maxHeight}=slashBounds();
+        slashSize={width:Math.round(sizeClamp(width+e.clientX-startX,minWidth,maxWidth)),
+          height:Math.round(sizeClamp(height+e.clientY-startY,minHeight,maxHeight))};
+        layoutSlash(activeField);
+      }
+      function end(e){
+        if(e.pointerId!==pointerId)return;
+        window.removeEventListener('pointermove',move,true);
+        window.removeEventListener('pointerup',end,true);
+        window.removeEventListener('pointercancel',end,true);
+        try{grip.releasePointerCapture(pointerId);}catch(_){}
+        if(e.type==='pointercancel')slashSize={width:Math.round(width),height:Math.round(height)};
+        resizingSlash=false;overlayTouchAt=Date.now();
+        saveSlashSize();
+        if(activeField?.isConnected)layoutSlash(activeField);
+      }
+      window.addEventListener('pointermove',move,{capture:true,passive:false});
+      window.addEventListener('pointerup',end,true);
+      window.addEventListener('pointercancel',end,true);
+    }
     function draw(field,entries,folders,theme){
-      if(!field?.isConnected || (document.activeElement!==field && Date.now()-overlayTouchAt>700)){dismiss();return;}
+      if(!field?.isConnected || (document.activeElement!==field && !resizingSlash && Date.now()-overlayTouchAt>700)){dismiss();return;}
       if(!overlay){
         overlay=document.createElement('div');overlay.id=FR;
-        overlay.style.cssText='position:fixed;z-index:2147483645;box-sizing:border-box;max-height:min(350px,55dvh);border-radius:13px;box-shadow:0 12px 34px #0007;font:13px/1.5 system-ui,sans-serif;overflow:hidden;';
+        overlay.style.cssText='position:fixed;z-index:2147483645;box-sizing:border-box;display:flex;flex-direction:column;border-radius:13px;box-shadow:0 12px 34px #0007;font:13px/1.5 system-ui,sans-serif;overflow:hidden;';
         document.body.append(overlay);
         overlay.addEventListener('pointerdown',e=>{
-          if(!e.target.closest('[data-ztlp-id],[data-ztlp-tab]'))return;
+          if(!e.target.closest('[data-ztlp-id],[data-ztlp-tab],[data-ztlp-resize]'))return;
           overlayTouchAt=Date.now();
           // iOS Safari may blur the textarea despite preventDefault.
           if(e.cancelable)e.preventDefault();
         });
       }
       overlay.dataset.theme=theme==='light'?'light':'dark';
-      const box=field.getBoundingClientRect(),width=Math.max(210,Math.min(400,box.width,innerWidth-16));
-      overlay.style.width=width+'px';
-      overlay.style.left=Math.min(innerWidth-width-8,Math.max(8,box.left))+'px';
-      const above=box.top>280;
-      overlay.style.top=above?'auto':Math.min(innerHeight-160,box.bottom+5)+'px';
-      overlay.style.bottom=above?Math.max(8,innerHeight-box.top+5)+'px':'auto';
+      layoutSlash(field);
       const tabs=[{id:'all',name:'전체'},...folders];
       overlay.innerHTML='<style>'+
         '#ztlp-slash{--bg:#292929;--head:#303030;--text:#f2f2f2;--muted:#aaa;--line:#505050;--hover:#393939;--selected:#f1f1f1;background:var(--bg);color:var(--text);border:1px solid var(--line)}'+
@@ -95,7 +176,10 @@
         '#ztlp-slash [data-ztlp-tab]{border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);border-radius:0;padding:9px 13px;white-space:nowrap;flex-shrink:0;font:600 13px system-ui,sans-serif;touch-action:manipulation}'+
         '#ztlp-slash [data-ztlp-tab][aria-selected="true"]{color:var(--text);border-bottom-color:var(--selected)}'+
         '#ztlp-slash [data-ztlp-tab]:focus-visible,#ztlp-slash [data-ztlp-id]:focus-visible{outline:2px solid var(--selected);outline-offset:-2px}'+
-        '#ztlp-slash .ztlp-items{overflow-y:auto;max-height:min(245px,38dvh);overscroll-behavior:contain}'+
+        '#ztlp-slash .ztlp-items{overflow-y:auto;min-height:0;flex:1;overscroll-behavior:contain;padding-bottom:5px}'+
+        '#ztlp-slash .ztlp-tabs{flex:0 0 auto}'+
+        '#ztlp-slash .ztlp-resizebar{height:20px;flex:0 0 20px;background:var(--head);border-top:1px solid var(--line);position:relative}'+
+        '#ztlp-slash [data-ztlp-resize]{position:absolute;right:0;bottom:0;width:36px;height:32px;display:flex;align-items:flex-end;justify-content:flex-end;border:0;background:transparent;color:var(--muted);font-size:19px;padding:0 6px 2px 0;cursor:nwse-resize;touch-action:none;user-select:none}'+
         '#ztlp-slash [data-ztlp-id]{border:0;border-radius:7px;display:block;width:100%;text-align:left;padding:9px 11px;margin:2px 0;background:transparent;color:var(--text);font:inherit;cursor:pointer;touch-action:manipulation}'+
         '#ztlp-slash [data-ztlp-id]:active,#ztlp-slash [data-ztlp-id]:hover{background:var(--hover)}'+
         '#ztlp-slash .ztlp-titleline{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:7px;row-gap:2px;overflow-wrap:anywhere}#ztlp-slash .ztlp-path{display:inline;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5}#ztlp-slash .ztlp-excerpt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:3em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:12px;margin-top:3px}'+
@@ -105,7 +189,11 @@
         tabs.map(tab=>'<button type="button" role="tab" data-ztlp-tab="'+escapeHTML(tab.id)+'" aria-selected="'+(tab.id===selectedTab?'true':'false')+'">'+escapeHTML(tab.name)+'</button>').join('')+'</nav>'+
         '<div class="ztlp-items">'+
         (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><span class="ztlp-titleline"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">'+escapeHTML(e.path)+'</small></span><span class="ztlp-excerpt">'+escapeHTML(e.preview||'')+'</span></button>').join(''):
-        '<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>')+'</div>';
+        '<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>')+'</div>'+
+        '<div class="ztlp-resizebar"><button type="button" data-ztlp-resize aria-label="슬래시 메뉴 크기 조절" title="드래그: 크기 조절 / 두 번 클릭: 크기 초기화">◢</button></div>';
+      const grip=overlay.querySelector('[data-ztlp-resize]');
+      grip.addEventListener('pointerdown',startSlashResize);
+      grip.addEventListener('dblclick',e=>{e.preventDefault();e.stopPropagation();slashSize=null;saveSlashSize();layoutSlash(field);});
     }
     function fetchSlashResults(el,immediate=false){
       if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
@@ -203,7 +291,7 @@
     function onMenuFocusout(e){
       if(e.target===activeField)setTimeout(()=>{
         // A tap on the menu is not a user request to close it.
-        if(Date.now()-overlayTouchAt<700)return;
+        if(resizingSlash||Date.now()-overlayTouchAt<700)return;
         if(activeField===e.target&&!overlay?.contains(document.activeElement))dismiss();
       },180);
     }
@@ -265,6 +353,10 @@
       document.removeEventListener('compositionend',onMenuCompositionEnd,true);
       document.removeEventListener('click',onMenuClick,true);
     }
+    // No viewport observers are added until a slash popup is in use.
+    const relayout=()=>{if(overlay&&activeField)layoutSlash(activeField);};
+    window.addEventListener('resize',relayout,{passive:true});
+    window.visualViewport?.addEventListener?.('resize',relayout,{passive:true});
     window.addEventListener('pagehide',dismiss,{once:true});
     // Used by the parent to verify actual iframe script readiness.
     window.addEventListener('message',e=>{
@@ -278,7 +370,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -727,7 +819,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
     footer.innerHTML=`<button class="btn primary" data-act="saverename">저장</button><button class="btn" data-act="folders">취소</button>`;
   }
   function renderSettings(){
-    content.innerHTML=`<h3>창 및 실행 버튼 설정</h3><div class="box settingshint"><strong>채팅 슬래시 단축어</strong><label class="row"><input type="checkbox" id="ztlp-slash-toggle" ${ui.slashEnabled!==false?'checked':''}> / 입력 시 텍스트 검색 목록 표시</label><div class="muted">입력창에 본문을 삽입하며 자동 전송하지 않습니다.</div></div><label class="field" for="theme-select">화면 테마</label><select id="theme-select"><option value="auto" ${ui.theme==='auto'?'selected':''}>기기 설정에 따르기</option><option value="light" ${ui.theme==='light'?'selected':''}>라이트 모드</option><option value="dark" ${ui.theme==='dark'?'selected':''}>다크 모드</option></select><div class="box settingshint">창 상단을 끌어 위치를 이동하고, 오른쪽 아래 ◢ 모서리를 끌어 창 크기를 조절합니다. 실행 버튼 자체를 끌어서 위치를 옮길 수 있습니다.</div><label class="field">실행 버튼 글자 / 이모지 (직접 입력)</label><input id="button-text" maxlength="32" type="text" value="${esc(ui.buttonText)}" placeholder="📚 또는 OOC, 보관함"><label class="field" for="button-size">실행 버튼 크기: <span id="button-size-value">${ui.buttonSize}px</span></label><input id="button-size" type="range" min="32" max="100" step="2" value="${ui.buttonSize}"><div class="box"><div class="muted">현재 창 크기: <span id="panel-dimensions">${Math.round(ui.panelW)} × ${Math.round(ui.panelH)}px</span></div><div class="muted">창 내부의 내용이 길면 내부만 스크롤됩니다.</div></div><div class="box settingshint"><strong>초기화</strong><div class="muted">UI 초기화는 버튼 글자·크기, 창 크기·위치, 테마를 기본값으로 되돌리고 저장된 폴더와 텍스트는 유지합니다.</div><button class="btn" style="margin-top:8px" data-act="resetui">UI 설정 초기화</button></div><div class="box settingshint"><strong>보관함 전체 초기화</strong><div class="muted">저장한 모든 텍스트와 사용자 폴더를 삭제하고 기본 폴더( OOC / 유저 프로필 / 기타 및 OOC의 요약 / 문체 )로 복원합니다. 창·버튼 설정은 그대로 유지됩니다. 실행 전 JSON 백업을 권장합니다.</div><button class="btn danger" style="margin-top:8px" data-act="resetlibrary">보관함 전체 초기화</button></div>`;
+    content.innerHTML=`<h3>창 및 실행 버튼 설정</h3><div class="box settingshint"><strong>채팅 슬래시 단축어</strong><label class="row"><input type="checkbox" id="ztlp-slash-toggle" ${ui.slashEnabled!==false?'checked':''}> / 입력 시 텍스트 검색 목록 표시</label><div class="muted">입력창에 본문을 삽입하며 자동 전송하지 않습니다. / 메뉴 오른쪽 아래 ◢을 끌어 크기를 조절할 수 있습니다. ◢을 두 번 클릭하면 기본 크기로 초기화됩니다.</div></div><label class="field" for="theme-select">화면 테마</label><select id="theme-select"><option value="auto" ${ui.theme==='auto'?'selected':''}>기기 설정에 따르기</option><option value="light" ${ui.theme==='light'?'selected':''}>라이트 모드</option><option value="dark" ${ui.theme==='dark'?'selected':''}>다크 모드</option></select><div class="box settingshint">창 상단을 끌어 위치를 이동하고, 오른쪽 아래 ◢ 모서리를 끌어 창 크기를 조절합니다. 실행 버튼 자체를 끌어서 위치를 옮길 수 있습니다.</div><label class="field">실행 버튼 글자 / 이모지 (직접 입력)</label><input id="button-text" maxlength="32" type="text" value="${esc(ui.buttonText)}" placeholder="📚 또는 OOC, 보관함"><label class="field" for="button-size">실행 버튼 크기: <span id="button-size-value">${ui.buttonSize}px</span></label><input id="button-size" type="range" min="32" max="100" step="2" value="${ui.buttonSize}"><div class="box"><div class="muted">현재 창 크기: <span id="panel-dimensions">${Math.round(ui.panelW)} × ${Math.round(ui.panelH)}px</span></div><div class="muted">창 내부의 내용이 길면 내부만 스크롤됩니다.</div></div><div class="box settingshint"><strong>초기화</strong><div class="muted">UI 초기화는 버튼 글자·크기, 창 크기·위치, 테마를 기본값으로 되돌리고 저장된 폴더와 텍스트는 유지합니다.</div><button class="btn" style="margin-top:8px" data-act="resetui">UI 설정 초기화</button></div><div class="box settingshint"><strong>보관함 전체 초기화</strong><div class="muted">저장한 모든 텍스트와 사용자 폴더를 삭제하고 기본 폴더( OOC / 유저 프로필 / 기타 및 OOC의 요약 / 문체 )로 복원합니다. 창·버튼 설정은 그대로 유지됩니다. 실행 전 JSON 백업을 권장합니다.</div><button class="btn danger" style="margin-top:8px" data-act="resetlibrary">보관함 전체 초기화</button></div>`;
     footer.innerHTML=`<button class="btn primary" data-act="savesettings">설정 저장</button><button class="btn" data-act="main">돌아가기</button>`;
   }
   function renderBackup(){
