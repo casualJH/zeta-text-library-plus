@@ -30,7 +30,7 @@
     let searchTimer=null;
     const searchCache=new Map();
     const PAGE_SIZE=24;
-    let pageOffset=0,hasMore=false,loadingMore=false,renderKey='';
+    let pageOffset=0,hasMore=false,loadingMore=false;
     let resizeCleanup=null;
     let overlay=null;
     let activeListeners=false;
@@ -72,7 +72,7 @@
       if(!overlay && activeField===null)return;
       resizingSlash=false;
       resizeCleanup?.();resizeCleanup=null;
-      pageOffset=0;hasMore=false;loadingMore=false;renderKey='';
+      pageOffset=0;hasMore=false;loadingMore=false;
       if(overlay){overlay.remove();overlay=null;}
       activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;
     }
@@ -198,7 +198,6 @@
         '#ztlp-slash .ztlp-titleline{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:7px;row-gap:2px;overflow-wrap:anywhere}#ztlp-slash .ztlp-path{display:inline;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5}#ztlp-slash .ztlp-excerpt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:3em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:12px;margin-top:3px}'+
         '#ztlp-slash .ztlp-empty{padding:13px;color:var(--muted)}'+
         '</style>'+
-        '</style>'+
           '<nav class="ztlp-tabs" role="tablist" aria-label="보관함 폴더"></nav>'+
           '<div class="ztlp-items"></div>'+
           '<div class="ztlp-resizebar"><button type="button" data-ztlp-resize aria-label="슬래시 메뉴 크기 조절" title="드래그: 크기 조절 / 두 번 클릭: 크기 초기화">◢</button></div>';
@@ -239,7 +238,6 @@
       const serial=++requestSerial,query=lastQuery,folderId=selectedTab;
       pageOffset=0;hasMore=false;loadingMore=false;
       const key=folderId+'\\u0000'+query;
-      renderKey=key;
       const cached=searchCache.get(key);
       if(cached&&Date.now()-cached.at<2000){applySlashAnswer(cached.value,el,serial,false);return;}
       searchTimer=setTimeout(()=>{
@@ -481,16 +479,18 @@
     data.folders.forEach(f => { if (obsoleteDefaultIds.has(f.parentId)) f.parentId = null; });
     data.folders = data.folders.filter(f => !obsoleteDefaultIds.has(f.id));
   }
+  let repairedLegacyFolders=obsoleteDefaultIds.size>0;
   if (data.folders.some(f=>f.id==='ooc')) {
     for (const [id,name] of [['ooc-summary','요약'],['ooc-style','문체']]) {
       if (!data.folders.some(f=>f.parentId==='ooc' && f.name===name)) {
         data.folders.push({id:data.folders.some(f=>f.id===id)?uid():id,parentId:'ooc',name});
+        repairedLegacyFolders=true;
       }
     }
   }
   // Existing data is never rewritten on every page load.
   // Migration data is persisted only if a legacy folder was actually repaired.
-  if(obsoleteDefaultIds.size)write(DATA_KEY,data);
+  if(repairedLegacyFolders)write(DATA_KEY,data);
   const oldUi = read(UI_KEY, defaultUi());
   let ui = {...defaultUi(), ...(oldUi && typeof oldUi === 'object' ? oldUi : {})};
   ui.theme = ['light','dark','auto'].includes(ui.theme) ? ui.theme : 'auto';
@@ -596,7 +596,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
         reply.items=matches.slice(0,24).map(entry=>{
           const folder=folderMap.get(entry.folderId);
           const parent=folder?.parentId?folderMap.get(folder.parentId):null;
-          return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류',preview:String(entry.body||'').trim().replace(/\\s+/g,' ').slice(0,160)};
+          return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류',preview:String(entry.body||'').trim().replace(/\s+/g,' ').slice(0,160)};
         });
         reply.ok=true;
       }else if(msg.kind==='get-text'&&typeof msg.id==='string'){
