@@ -54,7 +54,8 @@
           if(e.data?.protocol!==PLUS_PROTO || e.data.requestId!==requestId){reject(new Error('invalid reply'));return;}
           resolve(e.data);
         };
-        window.parent.postMessage({protocol:PLUS_PROTO,requestId,kind,...data},'https://zeta-ai.io',[ch.port2]);
+        const parentOrigin=(()=>{try{const v=new URL(document.referrer).origin;return plusIsZeta(v)?v:'https://zeta-ai.io';}catch(_){return 'https://zeta-ai.io';}})();
+        window.parent.postMessage({protocol:PLUS_PROTO,requestId,kind,...data},parentOrigin,[ch.port2]);
       });
     }
     function draw(field,entries){
@@ -63,6 +64,8 @@
         overlay=document.createElement('div');overlay.id=FR;
         overlay.style.cssText='position:fixed;z-index:2147483645;box-sizing:border-box;background:#242632;color:#f3f4fa;border:1px solid #707790;border-radius:12px;padding:6px;box-shadow:0 12px 34px #0008;max-height:260px;overflow:auto;font:13px/1.5 system-ui,sans-serif;';
         document.body.append(overlay);
+        // Preserve the active chat input and caret when a suggestion is tapped.
+        overlay.addEventListener('pointerdown',e=>{if(e.target.closest('[data-ztlp-id]'))e.preventDefault();});
       }
       const box=field.getBoundingClientRect(),width=Math.max(210,Math.min(380,box.width,innerWidth-16));
       overlay.style.width=width+'px';
