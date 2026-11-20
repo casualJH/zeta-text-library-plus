@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.3
+// @version      0.1.4
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -27,6 +27,8 @@
     if (!plusFrameUrl(new URL(location.href)) || window.parent === window) return;
     const FR = 'ztlp-slash';
     let activeField=null, anchorStart=-1, lastQuery='', listEntries=[], listFolders=[], selectedTab='all', requestSerial=0, composing=false;
+    let searchTimer=null;
+    const searchCache=new Map();
     let overlay=null;
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const isField=el=>el instanceof HTMLTextAreaElement && el.matches('textarea[name="message"]') && !el.disabled && !el.readOnly;
@@ -39,7 +41,12 @@
       range.selectNodeContents(el);range.setEnd(sel.anchorNode,sel.anchorOffset);
       return {text:range.toString(),end:range.toString().length};
     }
-    function dismiss(){if(overlay){overlay.remove();overlay=null;}activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;}
+    function dismiss(){
+      if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
+      if(!overlay && activeField===null)return;
+      if(overlay){overlay.remove();overlay=null;}
+      activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;
+    }
     async function contact(kind,data={}){
       return new Promise((resolve,reject)=>{
         const ch=new MessageChannel();
@@ -92,25 +99,43 @@
         (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><span class="ztlp-titleline"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">'+escapeHTML(e.path)+'</small></span><span class="ztlp-excerpt">'+escapeHTML(e.preview||'')+'</span></button>').join(''):
         '<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>')+'</div>';
     }
-    function fetchSlashResults(el){
+    function fetchSlashResults(el,immediate=false){
+      if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
       const serial=++requestSerial;
-      contact('search',{query:lastQuery,folderId:selectedTab}).then(answer=>{
-        if(serial!==requestSerial||activeField!==el)return;
+      const query=lastQuery,folderId=selectedTab;
+      const key=folderId+'\u0000'+query;
+      const renderReply=answer=>{
+        if(serial!==requestSerial||activeField!==el||!el.isConnected)return;
         if(!answer.ok||!answer.enabled){dismiss();return;}
         listFolders=Array.isArray(answer.tabs)?answer.tabs:[];
         selectedTab=typeof answer.activeTab==='string'?answer.activeTab:'all';
         listEntries=Array.isArray(answer.items)?answer.items:[];
         draw(el,listEntries,listFolders,answer.theme);
-      }).catch(()=>{if(serial===requestSerial)dismiss();});
+      };
+      const cached=searchCache.get(key);
+      if(cached&&Date.now()-cached.at<2000){renderReply(cached.value);return;}
+      searchTimer=setTimeout(()=>{
+        searchTimer=null;
+        if(serial!==requestSerial||activeField!==el)return;
+        contact('search',{query,folderId}).then(answer=>{
+          if(!answer.ok||!answer.enabled){renderReply(answer);return;}
+          searchCache.set(key,{at:Date.now(),value:answer});
+          if(searchCache.size>30)searchCache.delete(searchCache.keys().next().value);
+          renderReply(answer);
+        }).catch(()=>{if(serial===requestSerial)dismiss();});
+      },immediate?30:115);
     }
     function slashSearch(el){
-      if(!isField(el)||composing){dismiss();return;}
+      if(!isField(el)||composing){if(activeField!==null||overlay)dismiss();return;}
       const pos=currentPosition(el);
-      if(!pos){dismiss();return;}
-      const match=/(?:^|\s)\/([^\s\/]{0,42})$/.exec(pos.text);
-      if(!match){dismiss();return;}
+      if(!pos){if(activeField!==null||overlay)dismiss();return;}
+      // Inspect only the last 48 characters instead of scanning the whole draft.
+      const tail=pos.text.slice(-48);
+      const match=/(?:^|\s)\/([^\s\/]{0,42})$/.exec(tail);
+      if(!match){if(activeField!==null||overlay)dismiss();return;}
+      const wasIdle=activeField===null;
       activeField=el;anchorStart=pos.end-match[1].length-1;lastQuery=match[1];
-      fetchSlashResults(el);
+      fetchSlashResults(el,wasIdle);
     }
     function insertAtSlash(el,body){
       const pos=currentPosition(el);
@@ -143,9 +168,14 @@
       sel.removeAllRanges();el.dispatchEvent(new InputEvent('input',{bubbles:true,composed:true,inputType:'insertText',data:body}));
       return el.textContent.includes(body);
     }
-    document.addEventListener('input',e=>{if(isField(e.target))slashSearch(e.target);},true);
-    document.addEventListener('compositionstart',()=>{composing=true;dismiss();},true);
-    document.addEventListener('compositionend',e=>{composing=false;if(isField(e.target))slashSearch(e.target);},true);
+    document.addEventListener('input',e=>{
+      // Normal chat typing/streamed messages do not need slash processing.
+      if(!isField(e.target))return;
+      if(activeField===null && !overlay && !(typeof e.data==='string' && e.data.includes('/')))return;
+      slashSearch(e.target);
+    },true);
+    document.addEventListener('compositionstart',e=>{if(!isField(e.target))return;composing=true;if(activeField!==null||overlay)dismiss();},true);
+    document.addEventListener('compositionend',e=>{if(!isField(e.target))return;composing=false; if(activeField!==null||overlay)slashSearch(e.target);},true);
     document.addEventListener('keydown',e=>{
       if(!overlay)return;
       if(e.key==='Escape'){dismiss();return;}
@@ -157,6 +187,7 @@
     document.addEventListener('pointerdown',e=>{if(overlay && !overlay.contains(e.target) && e.target!==activeField)dismiss();},true);
     document.addEventListener('focusout',e=>{if(e.target===activeField)setTimeout(()=>{if(!overlay?.contains(document.activeElement))dismiss();},150);},true);
     document.addEventListener('click',async e=>{
+      if(!overlay)return;
       const tab=e.target.closest?.('#'+FR+' [data-ztlp-tab]');
       if(tab){
         if(!activeField?.isConnected)return;
@@ -187,7 +218,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -354,7 +385,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
           if(reply.activeTab!=='all'&&root!==reply.activeTab)return false;
           return !searchText || String(entry.title||'').toLocaleLowerCase().includes(searchText) ||
             (folder?.name||'').toLocaleLowerCase().includes(searchText);
-        }).slice(0,60).map(entry=>{
+        }).slice(0,24).map(entry=>{
           const folder=data.folders.find(f=>f.id===entry.folderId);
           const parent=folder?.parentId?data.folders.find(f=>f.id===folder.parentId):null;
           return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류',preview:String(entry.body||'').trim().replace(/\s+/g,' ').slice(0,160)};
