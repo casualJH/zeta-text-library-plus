@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.8
+// @version      0.1.9
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -29,6 +29,9 @@
     let activeField=null, anchorStart=-1, lastQuery='', listEntries=[], listFolders=[], selectedTab='all', requestSerial=0, composing=false;
     let searchTimer=null;
     const searchCache=new Map();
+    const PAGE_SIZE=24;
+    let pageOffset=0,hasMore=false,loadingMore=false,renderKey='';
+    let resizeCleanup=null;
     let overlay=null;
     let activeListeners=false;
     let overlayTouchAt=0;
@@ -68,6 +71,8 @@
       if(activeListeners){uninstallMenuListeners();activeListeners=false;}
       if(!overlay && activeField===null)return;
       resizingSlash=false;
+      resizeCleanup?.();resizeCleanup=null;
+      pageOffset=0;hasMore=false;loadingMore=false;renderKey='';
       if(overlay){overlay.remove();overlay=null;}
       activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;
     }
@@ -135,11 +140,16 @@
           height:Math.round(sizeClamp(height+e.clientY-startY,minHeight,maxHeight))};
         layoutSlash(activeField);
       }
-      function end(e){
-        if(e.pointerId!==pointerId)return;
+      function detach(){
         window.removeEventListener('pointermove',move,true);
         window.removeEventListener('pointerup',end,true);
         window.removeEventListener('pointercancel',end,true);
+        resizeCleanup=null;
+      }
+      resizeCleanup=detach;
+      function end(e){
+        if(e.pointerId!==pointerId)return;
+        detach();
         try{grip.releasePointerCapture(pointerId);}catch(_){}
         if(e.type==='pointercancel')slashSize={width:Math.round(width),height:Math.round(height)};
         resizingSlash=false;overlayTouchAt=Date.now();
@@ -150,7 +160,15 @@
       window.addEventListener('pointerup',end,true);
       window.addEventListener('pointercancel',end,true);
     }
-    function draw(field,entries,folders,theme){
+    function slashRow(e){
+      return '<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><span class="ztlp-titleline"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">'+escapeHTML(e.path)+'</small></span><span class="ztlp-excerpt">'+escapeHTML(e.preview||'')+'</span></button>';
+    }
+    function maybeLoadMore(){
+      if(!overlay||!activeField||!hasMore||loadingMore||resizingSlash)return;
+      const list=overlay.querySelector('.ztlp-items');
+      if(list&&list.scrollTop+list.clientHeight>=list.scrollHeight-80)fetchNextSlashPage();
+    }
+    function draw(field,entries,folders,theme,append=false){
       if(!field?.isConnected || (document.activeElement!==field && !resizingSlash && Date.now()-overlayTouchAt>700)){dismiss();return;}
       if(!overlay){
         overlay=document.createElement('div');overlay.id=FR;
@@ -159,14 +177,9 @@
         overlay.addEventListener('pointerdown',e=>{
           if(!e.target.closest('[data-ztlp-id],[data-ztlp-tab],[data-ztlp-resize]'))return;
           overlayTouchAt=Date.now();
-          // iOS Safari may blur the textarea despite preventDefault.
           if(e.cancelable)e.preventDefault();
         });
-      }
-      overlay.dataset.theme=theme==='light'?'light':'dark';
-      layoutSlash(field);
-      const tabs=[{id:'all',name:'전체'},...folders];
-      overlay.innerHTML='<style>'+
+              overlay.innerHTML='<style>'+
         '#ztlp-slash{--bg:#292929;--head:#303030;--text:#f2f2f2;--muted:#aaa;--line:#505050;--hover:#393939;--selected:#f1f1f1;background:var(--bg);color:var(--text);border:1px solid var(--line)}'+
         '#ztlp-slash[data-theme="light"]{--bg:#fff;--head:#f5f5f5;--text:#222;--muted:#707070;--line:#ddd;--hover:#efefef;--selected:#202020}'+
         '#ztlp-slash *{box-sizing:border-box}'+
@@ -185,41 +198,70 @@
         '#ztlp-slash .ztlp-titleline{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:7px;row-gap:2px;overflow-wrap:anywhere}#ztlp-slash .ztlp-path{display:inline;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5}#ztlp-slash .ztlp-excerpt{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:3em;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:12px;margin-top:3px}'+
         '#ztlp-slash .ztlp-empty{padding:13px;color:var(--muted)}'+
         '</style>'+
-        '<nav class="ztlp-tabs" role="tablist" aria-label="보관함 폴더">'+
-        tabs.map(tab=>'<button type="button" role="tab" data-ztlp-tab="'+escapeHTML(tab.id)+'" aria-selected="'+(tab.id===selectedTab?'true':'false')+'">'+escapeHTML(tab.name)+'</button>').join('')+'</nav>'+
-        '<div class="ztlp-items">'+
-        (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><span class="ztlp-titleline"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">'+escapeHTML(e.path)+'</small></span><span class="ztlp-excerpt">'+escapeHTML(e.preview||'')+'</span></button>').join(''):
-        '<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>')+'</div>'+
-        '<div class="ztlp-resizebar"><button type="button" data-ztlp-resize aria-label="슬래시 메뉴 크기 조절" title="드래그: 크기 조절 / 두 번 클릭: 크기 초기화">◢</button></div>';
-      const grip=overlay.querySelector('[data-ztlp-resize]');
-      grip.addEventListener('pointerdown',startSlashResize);
-      grip.addEventListener('dblclick',e=>{e.preventDefault();e.stopPropagation();slashSize=null;saveSlashSize();layoutSlash(field);});
+        '</style>'+
+          '<nav class="ztlp-tabs" role="tablist" aria-label="보관함 폴더"></nav>'+
+          '<div class="ztlp-items"></div>'+
+          '<div class="ztlp-resizebar"><button type="button" data-ztlp-resize aria-label="슬래시 메뉴 크기 조절" title="드래그: 크기 조절 / 두 번 클릭: 크기 초기화">◢</button></div>';
+        const grip=overlay.querySelector('[data-ztlp-resize]');
+        grip.addEventListener('pointerdown',startSlashResize);
+        grip.addEventListener('dblclick',e=>{e.preventDefault();e.stopPropagation();slashSize=null;saveSlashSize();layoutSlash(field);});
+        overlay.querySelector('.ztlp-items').addEventListener('scroll',maybeLoadMore,{passive:true});
+      }
+      overlay.dataset.theme=theme==='light'?'light':'dark';
+      layoutSlash(field);
+      const tabHost=overlay.querySelector('.ztlp-tabs');
+      const tabIds=['all',...folders.map(f=>f.id)].join('\\u0000');
+      if(tabHost.dataset.tabs!==tabIds){
+        const tabs=[{id:'all',name:'전체'},...folders];
+        tabHost.innerHTML=tabs.map(tab=>'<button type="button" role="tab" data-ztlp-tab="'+escapeHTML(tab.id)+'" aria-selected="'+(tab.id===selectedTab?'true':'false')+'">'+escapeHTML(tab.name)+'</button>').join('');
+        tabHost.dataset.tabs=tabIds;
+      }
+      tabHost.querySelectorAll('[data-ztlp-tab]').forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.ztlpTab===selectedTab)));
+      const list=overlay.querySelector('.ztlp-items');
+      if(append){list.insertAdjacentHTML('beforeend',entries.map(slashRow).join(''));}
+      else{list.innerHTML=entries.length?entries.map(slashRow).join(''):'<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>';list.scrollTop=0;}
+      if(hasMore)requestAnimationFrame(maybeLoadMore);
+    }
+    function applySlashAnswer(answer,el,serial,append){
+      if(serial!==requestSerial||activeField!==el||!el.isConnected)return;
+      if(!answer.ok||!answer.enabled){dismiss();return;}
+      listFolders=Array.isArray(answer.tabs)?answer.tabs:[];
+      selectedTab=typeof answer.activeTab==='string'?answer.activeTab:'all';
+      const incoming=Array.isArray(answer.items)?answer.items:[];
+      if(append)listEntries.push(...incoming);else listEntries=incoming;
+      pageOffset=listEntries.length;
+      hasMore=answer.hasMore===true;
+      loadingMore=false;
+      draw(el,incoming,listFolders,answer.theme,append);
     }
     function fetchSlashResults(el,immediate=false){
       if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
-      const serial=++requestSerial;
-      const query=lastQuery,folderId=selectedTab;
-      const key=folderId+'\u0000'+query;
-      const renderReply=answer=>{
-        if(serial!==requestSerial||activeField!==el||!el.isConnected)return;
-        if(!answer.ok||!answer.enabled){dismiss();return;}
-        listFolders=Array.isArray(answer.tabs)?answer.tabs:[];
-        selectedTab=typeof answer.activeTab==='string'?answer.activeTab:'all';
-        listEntries=Array.isArray(answer.items)?answer.items:[];
-        draw(el,listEntries,listFolders,answer.theme);
-      };
+      const serial=++requestSerial,query=lastQuery,folderId=selectedTab;
+      pageOffset=0;hasMore=false;loadingMore=false;
+      const key=folderId+'\\u0000'+query;
+      renderKey=key;
       const cached=searchCache.get(key);
-      if(cached&&Date.now()-cached.at<2000){renderReply(cached.value);return;}
+      if(cached&&Date.now()-cached.at<2000){applySlashAnswer(cached.value,el,serial,false);return;}
       searchTimer=setTimeout(()=>{
         searchTimer=null;
         if(serial!==requestSerial||activeField!==el)return;
-        contact('search',{query,folderId}).then(answer=>{
-          if(!answer.ok||!answer.enabled){renderReply(answer);return;}
-          searchCache.set(key,{at:Date.now(),value:answer});
-          if(searchCache.size>30)searchCache.delete(searchCache.keys().next().value);
-          renderReply(answer);
+        contact('search',{query,folderId,offset:0}).then(answer=>{
+          if(answer.ok&&answer.enabled){
+            searchCache.set(key,{at:Date.now(),value:answer});
+            if(searchCache.size>30)searchCache.delete(searchCache.keys().next().value);
+          }
+          applySlashAnswer(answer,el,serial,false);
         }).catch(()=>{if(serial===requestSerial)dismiss();});
       },immediate?30:115);
+    }
+    function fetchNextSlashPage(){
+      if(!activeField||!hasMore||loadingMore||resizingSlash)return;
+      loadingMore=true;
+      const serial=requestSerial,el=activeField,offset=pageOffset,query=lastQuery,folderId=selectedTab;
+      contact('search',{query,folderId,offset}).then(answer=>{
+        if(serial!==requestSerial||el!==activeField)return;
+        applySlashAnswer(answer,el,serial,true);
+      }).catch(()=>{if(serial===requestSerial)loadingMore=false;});
     }
     function slashSearch(el){
       if(!isField(el)||composing){if(activeField!==null||overlay)dismiss();return;}
@@ -360,7 +402,9 @@
     window.addEventListener('pagehide',dismiss,{once:true});
     // Used by the parent to verify actual iframe script readiness.
     window.addEventListener('message',e=>{
-      if(!plusIsZeta(e.origin)||e.source!==window.parent||e.data?.protocol!==PLUS_PROTO||e.data.kind!=='ping'||e.ports.length!==1)return;
+      if(!plusIsZeta(e.origin)||e.source!==window.parent||e.data?.protocol!==PLUS_PROTO)return;
+      if(e.data.kind==='data-changed'){searchCache.clear();if(activeField){fetchSlashResults(activeField,true);}return;}
+      if(e.data.kind!=='ping'||e.ports.length!==1)return;
       const port=e.ports[0];
       port.postMessage({protocol:PLUS_PROTO,requestId:e.data.requestId,ok:true,session:location.href});
       port.close();
@@ -370,7 +414,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.8';
+  const VERSION = '0.1.9';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -444,7 +488,9 @@
       }
     }
   }
-  write(DATA_KEY,data);
+  // Existing data is never rewritten on every page load.
+  // Migration data is persisted only if a legacy folder was actually repaired.
+  if(obsoleteDefaultIds.size)write(DATA_KEY,data);
   const oldUi = read(UI_KEY, defaultUi());
   let ui = {...defaultUi(), ...(oldUi && typeof oldUi === 'object' ? oldUi : {})};
   ui.theme = ['light','dark','auto'].includes(ui.theme) ? ui.theme : 'auto';
@@ -531,16 +577,27 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
         reply.activeTab=msg.folderId==='all'||roots.some(folder=>folder.id===msg.folderId)?msg.folderId:'all';
         reply.theme=ui.theme==='dark'||(ui.theme==='auto'&&window.matchMedia?.('(prefers-color-scheme: dark)').matches)?'dark':'light';
         const searchText=typeof msg.query==='string'?msg.query.slice(0,42).toLocaleLowerCase():'';
-        reply.items=reply.enabled?data.entries.filter(entry=>{
-          const folder=entry.folderId?data.folders.find(f=>f.id===entry.folderId):null;
-          const root=folder?.parentId||folder?.id||null;
-          if(reply.activeTab!=='all'&&root!==reply.activeTab)return false;
-          return !searchText || String(entry.title||'').toLocaleLowerCase().includes(searchText);
-        }).slice(0,24).map(entry=>{
-          const folder=data.folders.find(f=>f.id===entry.folderId);
-          const parent=folder?.parentId?data.folders.find(f=>f.id===folder.parentId):null;
-          return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류',preview:String(entry.body||'').trim().replace(/\s+/g,' ').slice(0,160)};
-        }):[];
+        const folderMap=new Map(data.folders.map(folder=>[folder.id,folder]));
+        const offset=Number.isSafeInteger(msg.offset)&&msg.offset>=0?Math.min(msg.offset,20000):0;
+        const matches=[];
+        if(reply.enabled){
+          let skipped=0;
+          for(const entry of data.entries){
+            const folder=folderMap.get(entry.folderId);
+            const root=folder?.parentId||folder?.id||null;
+            if(reply.activeTab!=='all'&&root!==reply.activeTab)continue;
+            if(searchText&&!String(entry.title||'').toLocaleLowerCase().includes(searchText))continue;
+            if(skipped++<offset)continue;
+            matches.push(entry);
+            if(matches.length>24)break;
+          }
+        }
+        reply.hasMore=matches.length>24;
+        reply.items=matches.slice(0,24).map(entry=>{
+          const folder=folderMap.get(entry.folderId);
+          const parent=folder?.parentId?folderMap.get(folder.parentId):null;
+          return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류',preview:String(entry.body||'').trim().replace(/\\s+/g,' ').slice(0,160)};
+        });
         reply.ok=true;
       }else if(msg.kind==='get-text'&&typeof msg.id==='string'){
         const entry=data.entries.find(e=>e.id===msg.id);
@@ -633,7 +690,13 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)');
   function applyTheme(){ const dark=ui.theme==='dark' || (ui.theme==='auto' && !!prefersDark?.matches);host.dataset.theme=dark?'dark':'light';const toggle=$('#theme-toggle');if(toggle){toggle.textContent=dark?'☀':'☾';toggle.setAttribute('aria-label',dark?'라이트 모드로 변경':'다크 모드로 변경');toggle.title=dark?'라이트 모드로 변경':'다크 모드로 변경';} }
   prefersDark?.addEventListener?.('change',()=>{if(ui.theme==='auto')applyTheme();});
-  const persist = () => write(DATA_KEY,data);
+  let vaultRevision=0;
+  const persist = () => {
+    write(DATA_KEY,data);
+    vaultRevision++;
+    const frame=plusChatFrame();
+    frame?.contentWindow?.postMessage({protocol:PLUS_PROTO,kind:'data-changed',revision:vaultRevision},PLUS_ORIGIN);
+  };
   const persistUi = () => write(UI_KEY,ui);
   const folders = parent => data.folders.filter(f=>f.parentId===parent);
   const folderById = id => data.folders.find(f=>f.id===id);
@@ -748,7 +811,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
   }
   function card(e,disableDrag=false){
     const path=e.folderId ? [folderById(rootOf(e.folderId))?.name,folderById(e.folderId)?.parentId?folderById(e.folderId)?.name:null].filter(Boolean).join(' / ') : '미분류';
-    return `<article class="entry" data-entry-id="${esc(e.id)}"><div class="entry-title"><span>${esc(e.title||'제목 없음')}</span><span class="muted">${esc(path)}</span></div><div class="preview">${esc(e.body)}</div><div class="actions"><button class="btn sm copy-main" data-act="copy" data-id="${esc(e.id)}">복사</button><span class="action-spacer" aria-hidden="true"></span><label class="row tiny pick-label" title="여러 항목 선택" ${selectionMode?'':'hidden'}><input class="check" type="checkbox" data-pick="${esc(e.id)}" ${selected.has(e.id)?'checked':''}>선택</label><button class="btn sm" data-act="edit" data-id="${esc(e.id)}">수정</button>${disableDrag?'':`<button class="btn sm drag-handle" type="button" data-drag-id="${esc(e.id)}" aria-label="순서 드래그 이동" title="끌어서 이동 · 선택한 항목은 함께 이동">⠿</button>`}</div></article>`;
+    return `<article class="entry" data-entry-id="${esc(e.id)}"><div class="entry-title"><span>${esc(e.title||'제목 없음')}</span><span class="muted">${esc(path)}</span></div><div class="preview">${esc(String(e.body||"").slice(0,600))}</div><div class="actions"><button class="btn sm copy-main" data-act="copy" data-id="${esc(e.id)}">복사</button><span class="action-spacer" aria-hidden="true"></span><label class="row tiny pick-label" title="여러 항목 선택" ${selectionMode?'':'hidden'}><input class="check" type="checkbox" data-pick="${esc(e.id)}" ${selected.has(e.id)?'checked':''}>선택</label><button class="btn sm" data-act="edit" data-id="${esc(e.id)}">수정</button>${disableDrag?'':`<button class="btn sm drag-handle" type="button" data-drag-id="${esc(e.id)}" aria-label="순서 드래그 이동" title="끌어서 이동 · 선택한 항목은 함께 이동">⠿</button>`}</div></article>`;
   }
   function renderMain(){
     const visible=orderedVisible();
@@ -1021,6 +1084,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
       : [id];
     const startX=event.clientX,startY=event.clientY,pid=event.pointerId;
     let started=false,hoverId=null,after=false;
+    const entryNodes=new Map([...root.querySelectorAll('[data-entry-id]')].map(node=>[node.dataset.entryId,node]));
     const clearMarks=()=>{root.querySelectorAll('.drag-source,.drag-group,.drop-before,.drop-after').forEach(el=>el.classList.remove('drag-source','drag-group','drop-before','drop-after'));};
     const move=e=>{
       if(e.pointerId!==pid)return;
@@ -1028,7 +1092,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
       if(!started){started=true;handle.setPointerCapture?.(pid);}
       e.preventDefault();
       clearMarks();
-      for(const movingId of moving){const el=Array.from(root.querySelectorAll('[data-entry-id]')).find(node=>node.dataset.entryId===movingId);el?.classList.add(movingId===id?'drag-source':'drag-group');}
+      for(const movingId of moving){const el=entryNodes.get(movingId);el?.classList.add(movingId===id?'drag-source':'drag-group');}
       // Native shadowRoot.elementFromPoint keeps the drop target inside the panel.
       const hit=root.elementFromPoint?.(e.clientX,e.clientY);
       const card=hit?.closest?.('[data-entry-id]');
