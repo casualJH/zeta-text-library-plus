@@ -31,9 +31,7 @@
     let activeField=null, anchorStart=-1, lastQuery='', listEntries=[], requestSerial=0, composing=false;
     let overlay=null;
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const isField=el=>el instanceof HTMLElement && (
-      (el.matches('textarea,input[type="text"],input:not([type])') && !el.disabled && !el.readOnly) ||
-      el.isContentEditable);
+    const isField=el=>el instanceof HTMLTextAreaElement && el.matches('textarea[name="message"]') && !el.disabled && !el.readOnly;
     function currentPosition(el){
       if('selectionStart' in el && typeof el.selectionStart==='number')
         return {text:el.value.slice(0,el.selectionStart),end:el.selectionStart};
@@ -103,7 +101,7 @@
         const setter=Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')?.set;
         if(!setter)return false;
         const result=value.slice(0,start)+body+value.slice(end);
-        if(el.maxLength>=0&&result.length>el.maxLength)return false;
+        if(result.length>5000 || (el.maxLength>=0 && result.length>el.maxLength))return false;
         setter.call(el,result);el.setSelectionRange(start+body.length,start+body.length);
         el.dispatchEvent(new InputEvent('input',{bubbles:true,composed:true,inputType:'insertText',data:body}));
         return el.value===result;
@@ -358,7 +356,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
     }
     if(seq!==accessCheckSeq||frame!==plusChatFrame()||!showPanel||frameAccessShownFor===frame)return;
     frameAccessShownFor=frame;
-    const launcher=document.getElementById('ztlp-host')?.shadowRoot?.getElementById('launcher');
+    const launcher=document.getElementById('ztlp-host')?.shadowRoot?.getElementById('text-library-plus-launcher');
     if(launcher){launcher.dataset.frameUrl=new URL(frame.src,location.href).origin+new URL(frame.src,location.href).pathname;showSceneAccess(launcher);}
   }
 
@@ -370,7 +368,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
   root.innerHTML = `<style>
     :host { all:initial; color-scheme:light; font-family: -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; font-size:14px; }
     * {box-sizing:border-box} button,input,textarea,select {font:inherit} button {cursor:pointer;touch-action:manipulation} button:disabled{opacity:.4;cursor:default}
-    #launcher {position:fixed;right:16px;bottom:calc(24px + env(safe-area-inset-bottom));z-index:3;display:flex;align-items:center;justify-content:center;min-height:32px;min-width:32px;padding:5px 10px;background:#242633;color:#fff;border:1px solid #595d72;border-radius:999px;box-shadow:0 3px 14px #0004;pointer-events:auto;touch-action:none;white-space:nowrap;user-select:none;max-width:70vw;overflow:hidden}
+    #text-library-plus-launcher {position:fixed;right:16px;bottom:calc(24px + env(safe-area-inset-bottom));z-index:3;display:flex;align-items:center;justify-content:center;min-height:32px;min-width:32px;padding:5px 10px;background:#242633;color:#fff;border:1px solid #595d72;border-radius:999px;box-shadow:0 3px 14px #0004;pointer-events:auto;touch-action:none;white-space:nowrap;user-select:none;max-width:70vw;overflow:hidden}
     #panel {position:fixed;right:16px;bottom:calc(85px + env(safe-area-inset-bottom));z-index:2;width:380px;height:540px;max-width:calc(100vw - 12px);max-height:calc(100dvh - 14px);background:#fff;color:#242633;border:1px solid #c9cbd4;border-radius:14px;box-shadow:0 12px 45px #0005;display:flex;flex-direction:column;pointer-events:auto;overflow:hidden}
     #panel[hidden] {display:none} #header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px;background:#f7f7fa;border-bottom:1px solid #e5e5ed;touch-action:none;user-select:none;cursor:move;flex-shrink:0}
     #header strong{font-size:14px} #header .controls{display:flex;gap:5px} #content{padding:12px;overflow:auto;overscroll-behavior:contain;flex:1;min-height:0} #footer {display:flex;gap:7px;padding:10px 12px;border-top:1px solid #e5e5ed;flex-shrink:0;flex-wrap:wrap;background:#fff}
@@ -399,13 +397,13 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
     :host([data-theme="dark"]) #grip {color:#adb4cf}
     :host([data-theme="dark"]) .check {accent-color:#929ac3}
   </style>
-  <button type="button" id="launcher" aria-label="제타 텍스트 보관함+ 열기"></button>
+  <button type="button" id="text-library-plus-launcher" aria-label="텍스트 보관함+" title="텍스트 보관함+"></button>
   <section id="panel" hidden aria-label="제타 텍스트 보관함+">
     <div id="header"><strong>제타 텍스트 보관함+</strong><div class="controls"><button class="btn sm" type="button" data-act="toggletheme" id="theme-toggle" aria-label="테마 전환" title="라이트/다크 모드 전환">☾</button><button class="btn sm" data-act="settings" aria-label="설정">⚙</button><button class="btn sm" data-act="close" aria-label="닫기">✕</button></div></div>
     <main id="content"></main><footer id="footer"></footer><div id="toast"></div><div id="grip" title="끌어서 창 크기 조절">◢</div>
   </section>`;
   const $ = s => root.querySelector(s);
-  const launcher=$('#launcher'), panel=$('#panel'), content=$('#content'), footer=$('#footer');
+  const launcher=$('#text-library-plus-launcher'), panel=$('#panel'), content=$('#content'), footer=$('#footer');
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)');
   function applyTheme(){ const dark=ui.theme==='dark' || (ui.theme==='auto' && !!prefersDark?.matches);host.dataset.theme=dark?'dark':'light';const toggle=$('#theme-toggle');if(toggle){toggle.textContent=dark?'☀':'☾';toggle.setAttribute('aria-label',dark?'라이트 모드로 변경':'다크 모드로 변경');toggle.title=dark?'라이트 모드로 변경':'다크 모드로 변경';} }
   prefersDark?.addEventListener?.('change',()=>{if(ui.theme==='auto')applyTheme();});
@@ -725,7 +723,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
       case 'copyselected':{const values=orderedVisible().filter(e=>selected.has(e.id)).map(e=>e.body);if(values.length){void copyText(values.join('\n\n'));selectionMode=false;selected.clear();render();}return;}
       case 'export':downloadJson();return;
       case 'import':void importJson();return;
-      case 'savesettings':ui.theme=['light','dark','auto'].includes($('#theme-select')?.value)?$('#theme-select').value:'auto';ui.buttonText=sanitizeText($('#button-text')?.value||'📚',32);ui.buttonSize=asNumber($('#button-size')?.value,48,32,100);persistUi();applyUi();go('main');notify('설정을 저장했습니다.');return;
+      case 'savesettings':ui.theme=['light','dark','auto'].includes($('#theme-select')?.value)?$('#theme-select').value:'auto';ui.buttonText=sanitizeText($('#button-text')?.value||'📚+',32);ui.buttonSize=asNumber($('#button-size')?.value,48,32,100);persistUi();applyUi();go('main');notify('설정을 저장했습니다.');return;
       case 'resetui':{
         if(!confirm('UI 설정을 초기화할까요?\n버튼 글자·크기, 창 위치·크기 및 테마가 기본값으로 돌아갑니다.\n저장된 폴더와 텍스트는 그대로 유지됩니다.'))return;
         ui=defaultUi();persistUi();applyUi();render();notify('UI 설정을 초기화했습니다.');return;
