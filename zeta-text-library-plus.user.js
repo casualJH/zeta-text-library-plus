@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.4
+// @version      0.1.5
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -30,6 +30,7 @@
     let searchTimer=null;
     const searchCache=new Map();
     let overlay=null;
+    let activeListeners=false;
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const isField=el=>el instanceof HTMLTextAreaElement && el.matches('textarea[name="message"]') && !el.disabled && !el.readOnly;
     function currentPosition(el){
@@ -43,6 +44,7 @@
     }
     function dismiss(){
       if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
+      if(activeListeners){uninstallMenuListeners();activeListeners=false;}
       if(!overlay && activeField===null)return;
       if(overlay){overlay.remove();overlay=null;}
       activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;
@@ -135,6 +137,7 @@
       if(!match){if(activeField!==null||overlay)dismiss();return;}
       const wasIdle=activeField===null;
       activeField=el;anchorStart=pos.end-match[1].length-1;lastQuery=match[1];
+      if(!activeListeners){installMenuListeners();activeListeners=true;}
       fetchSlashResults(el,wasIdle);
     }
     function insertAtSlash(el,body){
@@ -168,25 +171,45 @@
       sel.removeAllRanges();el.dispatchEvent(new InputEvent('input',{bubbles:true,composed:true,inputType:'insertText',data:body}));
       return el.textContent.includes(body);
     }
-    document.addEventListener('input',e=>{
-      // Normal chat typing/streamed messages do not need slash processing.
+    // Dormant mode: a single passive trigger listener; ordinary keystrokes do not
+    // inspect the caret, query parent data, or create popup DOM.
+    function onSlashInput(e){
+      const isActive=e.target===activeField;
+      if(!isActive && !(typeof e.data==='string'&&e.data.includes('/')))return;
       if(!isField(e.target))return;
-      if(activeField===null && !overlay && !(typeof e.data==='string' && e.data.includes('/')))return;
+      if(composing||e.isComposing)return;
       slashSearch(e.target);
-    },true);
-    document.addEventListener('compositionstart',e=>{if(!isField(e.target))return;composing=true;if(activeField!==null||overlay)dismiss();},true);
-    document.addEventListener('compositionend',e=>{if(!isField(e.target))return;composing=false; if(activeField!==null||overlay)slashSearch(e.target);},true);
-    document.addEventListener('keydown',e=>{
-      if(!overlay)return;
+    }
+    document.addEventListener('input',onSlashInput,{capture:true,passive:true});
+
+    // Heavy interactive listeners exist only while slash mode is active.
+    function onMenuKeydown(e){
+      if(e.target!==activeField||!overlay)return;
       if(e.key==='Escape'){dismiss();return;}
-      if(e.key==='Enter' && !e.isComposing && listEntries.length){
+      if(e.key==='Enter'&&!e.isComposing&&listEntries.length){
         e.preventDefault();e.stopPropagation();
         overlay.querySelector('button[data-ztlp-id]')?.click();
       }
-    },true);
-    document.addEventListener('pointerdown',e=>{if(overlay && !overlay.contains(e.target) && e.target!==activeField)dismiss();},true);
-    document.addEventListener('focusout',e=>{if(e.target===activeField)setTimeout(()=>{if(!overlay?.contains(document.activeElement))dismiss();},150);},true);
-    document.addEventListener('click',async e=>{
+    }
+    function onMenuPointerdown(e){
+      if(overlay&&!overlay.contains(e.target)&&e.target!==activeField)dismiss();
+    }
+    function onMenuFocusout(e){
+      if(e.target===activeField)setTimeout(()=>{
+        if(activeField===e.target&&!overlay?.contains(document.activeElement))dismiss();
+      },150);
+    }
+    function onMenuCompositionStart(e){
+      if(e.target!==activeField)return;
+      composing=true;dismiss();
+    }
+    function onMenuCompositionEnd(e){
+      if(!isField(e.target))return;
+      composing=false;
+      // Only resume if an active search exists. New / typed later triggers input.
+      if(activeField===e.target)slashSearch(e.target);
+    }
+    async function onMenuClick(e){
       if(!overlay)return;
       const tab=e.target.closest?.('#'+FR+' [data-ztlp-tab]');
       if(tab){
@@ -205,7 +228,24 @@
         if(!success)alert('텍스트를 입력창에 삽입하지 못했습니다. 입력창 상태를 확인하세요.');
       }catch(_){alert('텍스트 보관함+ 연결이 끊어졌습니다.');}
       finally{dismiss();}
-    },true);
+    }
+    function installMenuListeners(){
+      document.addEventListener('keydown',onMenuKeydown,true);
+      document.addEventListener('pointerdown',onMenuPointerdown,true);
+      document.addEventListener('focusout',onMenuFocusout,true);
+      document.addEventListener('compositionstart',onMenuCompositionStart,true);
+      document.addEventListener('compositionend',onMenuCompositionEnd,true);
+      document.addEventListener('click',onMenuClick,true);
+    }
+    function uninstallMenuListeners(){
+      document.removeEventListener('keydown',onMenuKeydown,true);
+      document.removeEventListener('pointerdown',onMenuPointerdown,true);
+      document.removeEventListener('focusout',onMenuFocusout,true);
+      document.removeEventListener('compositionstart',onMenuCompositionStart,true);
+      document.removeEventListener('compositionend',onMenuCompositionEnd,true);
+      document.removeEventListener('click',onMenuClick,true);
+    }
+    window.addEventListener('pagehide',dismiss,{once:true});
     // Used by the parent to verify actual iframe script readiness.
     window.addEventListener('message',e=>{
       if(!plusIsZeta(e.origin)||e.source!==window.parent||e.data?.protocol!==PLUS_PROTO||e.data.kind!=='ping'||e.ports.length!==1)return;
@@ -218,7 +258,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
