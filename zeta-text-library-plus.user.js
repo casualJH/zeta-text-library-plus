@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.0
+// @version      0.1.1
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -28,7 +28,7 @@
   if (location.origin === PLUS_ORIGIN) {
     if (!plusFrameUrl(new URL(location.href)) || window.parent === window) return;
     const FR = 'ztlp-slash';
-    let activeField=null, anchorStart=-1, lastQuery='', listEntries=[], requestSerial=0, composing=false;
+    let activeField=null, anchorStart=-1, lastQuery='', listEntries=[], listFolders=[], selectedTab='all', requestSerial=0, composing=false;
     let overlay=null;
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const isField=el=>el instanceof HTMLTextAreaElement && el.matches('textarea[name="message"]') && !el.disabled && !el.readOnly;
@@ -41,7 +41,7 @@
       range.selectNodeContents(el);range.setEnd(sel.anchorNode,sel.anchorOffset);
       return {text:range.toString(),end:range.toString().length};
     }
-    function dismiss(){if(overlay){overlay.remove();overlay=null;}activeField=null;anchorStart=-1;listEntries=[];}
+    function dismiss(){if(overlay){overlay.remove();overlay=null;}activeField=null;anchorStart=-1;listEntries=[];listFolders=[];selectedTab='all';requestSerial++;}
     async function contact(kind,data={}){
       return new Promise((resolve,reject)=>{
         const ch=new MessageChannel();
@@ -56,24 +56,54 @@
         window.parent.postMessage({protocol:PLUS_PROTO,requestId,kind,...data},parentOrigin,[ch.port2]);
       });
     }
-    function draw(field,entries){
+    function draw(field,entries,folders,theme){
       if(!field?.isConnected || document.activeElement!==field){dismiss();return;}
       if(!overlay){
         overlay=document.createElement('div');overlay.id=FR;
-        overlay.style.cssText='position:fixed;z-index:2147483645;box-sizing:border-box;background:#242632;color:#f3f4fa;border:1px solid #707790;border-radius:12px;padding:6px;box-shadow:0 12px 34px #0008;max-height:260px;overflow:auto;font:13px/1.5 system-ui,sans-serif;';
+        overlay.style.cssText='position:fixed;z-index:2147483645;box-sizing:border-box;max-height:min(350px,55dvh);border-radius:13px;box-shadow:0 12px 34px #0007;font:13px/1.5 system-ui,sans-serif;overflow:hidden;';
         document.body.append(overlay);
-        // Preserve the active chat input and caret when a suggestion is tapped.
-        overlay.addEventListener('pointerdown',e=>{if(e.target.closest('[data-ztlp-id]'))e.preventDefault();});
+        overlay.addEventListener('pointerdown',e=>{if(e.target.closest('[data-ztlp-id],[data-ztlp-tab]'))e.preventDefault();});
       }
-      const box=field.getBoundingClientRect(),width=Math.max(210,Math.min(380,box.width,innerWidth-16));
+      overlay.dataset.theme=theme==='light'?'light':'dark';
+      const box=field.getBoundingClientRect(),width=Math.max(210,Math.min(400,box.width,innerWidth-16));
       overlay.style.width=width+'px';
       overlay.style.left=Math.min(innerWidth-width-8,Math.max(8,box.left))+'px';
       const above=box.top>280;
       overlay.style.top=above?'auto':Math.min(innerHeight-160,box.bottom+5)+'px';
       overlay.style.bottom=above?Math.max(8,innerHeight-box.top+5)+'px':'auto';
-      overlay.innerHTML='<div style="padding:5px 9px;color:#cbd2ee;font-weight:700">텍스트 보관함+</div>'+
-        (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'" style="text-align:left;display:block;width:100%;padding:7px 9px;margin:2px 0;background:transparent;color:inherit;border:0;border-radius:7px;cursor:pointer"><strong>'+escapeHTML(e.title)+'</strong><small style="display:block;color:#aeb6cf">'+escapeHTML(e.path)+'</small></button>').join(''):
-        '<div style="padding:8px;color:#b6bad0">일치하는 텍스트가 없습니다.</div>');
+      const tabs=[{id:'all',name:'전체'},...folders];
+      overlay.innerHTML='<style>'+
+        '#ztlp-slash{--bg:#292929;--head:#303030;--text:#f2f2f2;--muted:#aaa;--line:#505050;--hover:#393939;--selected:#f1f1f1;background:var(--bg);color:var(--text);border:1px solid var(--line)}'+
+        '#ztlp-slash[data-theme="light"]{--bg:#fff;--head:#f5f5f5;--text:#222;--muted:#707070;--line:#ddd;--hover:#efefef;--selected:#202020}'+
+        '#ztlp-slash *{box-sizing:border-box}'+
+        '#ztlp-slash .ztlp-head{padding:9px 12px 5px;background:var(--head);font-weight:700}'+
+        '#ztlp-slash .ztlp-tabs{display:flex;overflow-x:auto;max-width:100%;background:var(--head);border-bottom:1px solid var(--line);scrollbar-width:none;-webkit-overflow-scrolling:touch}'+
+        '#ztlp-slash .ztlp-tabs::-webkit-scrollbar{display:none}'+
+        '#ztlp-slash [data-ztlp-tab]{border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);border-radius:0;padding:9px 13px;white-space:nowrap;flex-shrink:0;font:600 13px system-ui,sans-serif;touch-action:manipulation}'+
+        '#ztlp-slash [data-ztlp-tab][aria-selected="true"]{color:var(--text);border-bottom-color:var(--selected)}'+
+        '#ztlp-slash [data-ztlp-tab]:focus-visible,#ztlp-slash [data-ztlp-id]:focus-visible{outline:2px solid var(--selected);outline-offset:-2px}'+
+        '#ztlp-slash .ztlp-items{overflow-y:auto;max-height:min(245px,38dvh);overscroll-behavior:contain}'+
+        '#ztlp-slash [data-ztlp-id]{border:0;border-radius:7px;display:block;width:100%;text-align:left;padding:9px 11px;margin:2px 0;background:transparent;color:var(--text);font:inherit;cursor:pointer;touch-action:manipulation}'+
+        '#ztlp-slash [data-ztlp-id]:active,#ztlp-slash [data-ztlp-id]:hover{background:var(--hover)}'+
+        '#ztlp-slash .ztlp-path{display:block;color:var(--muted);font-size:12px}'+
+        '#ztlp-slash .ztlp-empty{padding:13px;color:var(--muted)}'+
+        '</style><div class="ztlp-head">텍스트 보관함+</div>'+
+        '<nav class="ztlp-tabs" role="tablist" aria-label="보관함 폴더">'+
+        tabs.map(tab=>'<button type="button" role="tab" data-ztlp-tab="'+escapeHTML(tab.id)+'" aria-selected="'+(tab.id===selectedTab?'true':'false')+'">'+escapeHTML(tab.name)+'</button>').join('')+'</nav>'+
+        '<div class="ztlp-items">'+
+        (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">'+escapeHTML(e.path)+'</small></button>').join(''):
+        '<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>')+'</div>';
+    }
+    function fetchSlashResults(el){
+      const serial=++requestSerial;
+      contact('search',{query:lastQuery,folderId:selectedTab}).then(answer=>{
+        if(serial!==requestSerial||activeField!==el)return;
+        if(!answer.ok||!answer.enabled){dismiss();return;}
+        listFolders=Array.isArray(answer.tabs)?answer.tabs:[];
+        selectedTab=typeof answer.activeTab==='string'?answer.activeTab:'all';
+        listEntries=Array.isArray(answer.items)?answer.items:[];
+        draw(el,listEntries,listFolders,answer.theme);
+      }).catch(()=>{if(serial===requestSerial)dismiss();});
     }
     function slashSearch(el){
       if(!isField(el)||composing){dismiss();return;}
@@ -82,13 +112,7 @@
       const match=/(?:^|\s)\/([^\s\/]{0,42})$/.exec(pos.text);
       if(!match){dismiss();return;}
       activeField=el;anchorStart=pos.end-match[1].length-1;lastQuery=match[1];
-      const serial=++requestSerial;
-      contact('search',{query:lastQuery}).then(answer=>{
-        if(serial!==requestSerial||activeField!==el)return;
-        if(!answer.ok||!answer.enabled){dismiss();return;}
-        listEntries=Array.isArray(answer.items)?answer.items:[];
-        draw(el,listEntries);
-      }).catch(()=>{if(serial===requestSerial)dismiss();});
+      fetchSlashResults(el);
     }
     function insertAtSlash(el,body){
       const pos=currentPosition(el);
@@ -135,6 +159,13 @@
     document.addEventListener('pointerdown',e=>{if(overlay && !overlay.contains(e.target) && e.target!==activeField)dismiss();},true);
     document.addEventListener('focusout',e=>{if(e.target===activeField)setTimeout(()=>{if(!overlay?.contains(document.activeElement))dismiss();},150);},true);
     document.addEventListener('click',async e=>{
+      const tab=e.target.closest?.('#'+FR+' [data-ztlp-tab]');
+      if(tab){
+        if(!activeField?.isConnected)return;
+        selectedTab=tab.dataset.ztlpTab;
+        fetchSlashResults(activeField);
+        return;
+      }
       const b=e.target.closest?.('#'+FR+' [data-ztlp-id]');if(!b)return;
       const el=activeField,id=b.dataset.ztlpId;
       try{
@@ -158,7 +189,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -314,14 +345,21 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
     try{
       if(msg.kind==='search'){
         reply.enabled=ui.slashEnabled!==false;
-        reply.items=reply.enabled?data.entries.filter(e=> {
-          const folder=e.folderId?data.folders.find(f=>f.id===e.folderId):null;
-          return !msg.query || String(e.title||'').toLocaleLowerCase().includes(String(msg.query).toLocaleLowerCase()) ||
-            (folder?.name||'').toLocaleLowerCase().includes(String(msg.query).toLocaleLowerCase());
-        }).slice(0,12).map(e=>{
-          const folder=data.folders.find(f=>f.id===e.folderId);
+        const roots=data.folders.filter(folder=>folder.parentId===null);
+        reply.tabs=roots.map(folder=>({id:folder.id,name:folder.name}));
+        reply.activeTab=msg.folderId==='all'||roots.some(folder=>folder.id===msg.folderId)?msg.folderId:'all';
+        reply.theme=ui.theme==='dark'||(ui.theme==='auto'&&window.matchMedia?.('(prefers-color-scheme: dark)').matches)?'dark':'light';
+        const searchText=typeof msg.query==='string'?msg.query.slice(0,42).toLocaleLowerCase():'';
+        reply.items=reply.enabled?data.entries.filter(entry=>{
+          const folder=entry.folderId?data.folders.find(f=>f.id===entry.folderId):null;
+          const root=folder?.parentId||folder?.id||null;
+          if(reply.activeTab!=='all'&&root!==reply.activeTab)return false;
+          return !searchText || String(entry.title||'').toLocaleLowerCase().includes(searchText) ||
+            (folder?.name||'').toLocaleLowerCase().includes(searchText);
+        }).slice(0,60).map(entry=>{
+          const folder=data.folders.find(f=>f.id===entry.folderId);
           const parent=folder?.parentId?data.folders.find(f=>f.id===folder.parentId):null;
-          return {id:e.id,title:e.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류'};
+          return {id:entry.id,title:entry.title||'제목 없음',path:[parent?.name,folder?.name].filter(Boolean).join(' / ')||'미분류'};
         }):[];
         reply.ok=true;
       }else if(msg.kind==='get-text'&&typeof msg.id==='string'){
