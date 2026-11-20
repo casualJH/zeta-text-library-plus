@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.2.0
+// @version      0.2.1
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -422,7 +422,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -435,7 +435,7 @@
     {id:'ooc-summary',parentId:'ooc',name:'요약'},
     {id:'ooc-style',parentId:'ooc',name:'문체'}
   ], entries: [], orders: {} });
-  const defaultUi = () => ({ buttonText:'📚+',buttonSize:48,buttonPos:null,panelPos:null,panelW:380,panelH:540,theme:'auto',allSortMode:'folder',sortModes:{},sortBases:{} });
+  const defaultUi = () => ({ buttonText:'🗄️',buttonSize:48,buttonPos:null,panelPos:null,panelW:380,panelH:540,theme:'auto',allSortMode:'folder',sortModes:{},sortBases:{} });
   const safePos = p => p && Number.isFinite(p.x) && Number.isFinite(p.y) ? {x:p.x,y:p.y} : null;
   const asNumber = (n, fallback, min, max) => Number.isFinite(+n) ? Math.max(min, Math.min(max, +n)) : fallback;
   const sanitizeText = (v, max) => String(v ?? '').slice(0,max);
@@ -509,6 +509,9 @@
   ui.sortBases = ui.sortBases && typeof ui.sortBases==='object' && !Array.isArray(ui.sortBases)?ui.sortBases:{};
   if(!['folderAsc','folderDesc','createdAsc','createdDesc','user'].includes(ui.sortModes.all))
     ui.sortModes.all='folderAsc';
+  // Migrate only the previous built-in launcher label; preserve other user labels.
+  const migrateLauncherLabel=ui.buttonText==='📚+';
+  if(migrateLauncherLabel)ui.buttonText='🗄️';
   ui.buttonText = sanitizeText(ui.buttonText,32);
   ui.buttonSize = asNumber(ui.buttonSize,48,32,100);
   ui.panelW = asNumber(ui.panelW,380,260,1600);
@@ -728,7 +731,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
   }
   function applyUi() {
     applyTheme();
-    launcher.textContent=ui.buttonText || '📚+';
+    launcher.textContent=ui.buttonText || '🗄️';
     launcher.style.fontSize=Math.round(ui.buttonSize*.38)+'px';
     launcher.style.minHeight=ui.buttonSize+'px';
     launcher.style.minWidth=ui.buttonSize+'px';
@@ -896,7 +899,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
     footer.innerHTML=`<button class="btn primary" data-act="saverename">저장</button><button class="btn" data-act="folders">취소</button>`;
   }
   function renderSettings(){
-    content.innerHTML=`<h3>창 및 실행 버튼 설정</h3><div class="box settingshint"><strong>채팅 슬래시 단축어</strong><label class="row"><input type="checkbox" id="ztlp-slash-toggle" ${ui.slashEnabled!==false?'checked':''}> / 입력 시 텍스트 검색 목록 표시</label><div class="muted">입력창에 본문을 삽입하며 자동 전송하지 않습니다. / 메뉴 오른쪽 아래 ◢을 끌어 크기를 조절할 수 있습니다. ◢을 두 번 클릭하면 기본 크기로 초기화됩니다.</div></div><div class="field" id="theme-mode-label">테마 &gt; 화면 모드</div><div class="theme-segments" role="group" aria-labelledby="theme-mode-label"><button type="button" data-theme-mode="light" aria-pressed="${ui.theme==='light'}">라이트 모드</button><button type="button" data-theme-mode="dark" aria-pressed="${ui.theme==='dark'}">다크 모드</button><button type="button" data-theme-mode="auto" aria-pressed="${ui.theme==='auto'}">기기 설정</button></div><div class="box settingshint">창 상단을 끌어 위치를 이동하고, 오른쪽 아래 ◢ 모서리를 끌어 창 크기를 조절합니다. 실행 버튼 자체를 끌어서 위치를 옮길 수 있습니다.</div><label class="field">실행 버튼 글자 / 이모지 (직접 입력)</label><input id="button-text" maxlength="32" type="text" value="${esc(ui.buttonText)}" placeholder="📚 또는 OOC, 보관함"><label class="field" for="button-size">실행 버튼 크기: <span id="button-size-value">${ui.buttonSize}px</span></label><input id="button-size" type="range" min="32" max="100" step="2" value="${ui.buttonSize}"><div class="box"><div class="muted">현재 창 크기: <span id="panel-dimensions">${Math.round(ui.panelW)} × ${Math.round(ui.panelH)}px</span></div><div class="muted">창 내부의 내용이 길면 내부만 스크롤됩니다.</div></div><div class="box settingshint"><strong>초기화</strong><div class="muted">UI 초기화는 버튼 글자·크기, 창 크기·위치, 테마를 기본값으로 되돌리고 저장된 폴더와 텍스트는 유지합니다.</div><button class="btn" style="margin-top:8px" data-act="resetui">UI 설정 초기화</button></div><div class="box settingshint"><strong>보관함 전체 초기화</strong><div class="muted">저장한 모든 텍스트와 사용자 폴더를 삭제하고 기본 폴더( OOC / 유저 프로필 / 기타 및 OOC의 요약 / 문체 )로 복원합니다. 창·버튼 설정은 그대로 유지됩니다. 실행 전 JSON 백업을 권장합니다.</div><button class="btn danger" style="margin-top:8px" data-act="resetlibrary">보관함 전체 초기화</button></div>`;
+    content.innerHTML=`<h3>창 및 실행 버튼 설정</h3><div class="box settingshint"><strong>채팅 슬래시 단축어</strong><label class="row"><input type="checkbox" id="ztlp-slash-toggle" ${ui.slashEnabled!==false?'checked':''}> / 입력 시 텍스트 검색 목록 표시</label><div class="muted">입력창에 본문을 삽입하며 자동 전송하지 않습니다. / 메뉴 오른쪽 아래 ◢을 끌어 크기를 조절할 수 있습니다. ◢을 두 번 클릭하면 기본 크기로 초기화됩니다.</div></div><div class="field" id="theme-mode-label">테마 &gt; 화면 모드</div><div class="theme-segments" role="group" aria-labelledby="theme-mode-label"><button type="button" data-theme-mode="light" aria-pressed="${ui.theme==='light'}">라이트 모드</button><button type="button" data-theme-mode="dark" aria-pressed="${ui.theme==='dark'}">다크 모드</button><button type="button" data-theme-mode="auto" aria-pressed="${ui.theme==='auto'}">기기 설정</button></div><div class="box settingshint">창 상단을 끌어 위치를 이동하고, 오른쪽 아래 ◢ 모서리를 끌어 창 크기를 조절합니다. 실행 버튼 자체를 끌어서 위치를 옮길 수 있습니다.</div><label class="field">실행 버튼 글자 / 이모지 (직접 입력)</label><input id="button-text" maxlength="32" type="text" value="${esc(ui.buttonText)}" placeholder="🗄️ 또는 OOC, 보관함"><label class="field" for="button-size">실행 버튼 크기: <span id="button-size-value">${ui.buttonSize}px</span></label><input id="button-size" type="range" min="32" max="100" step="2" value="${ui.buttonSize}"><div class="box"><div class="muted">현재 창 크기: <span id="panel-dimensions">${Math.round(ui.panelW)} × ${Math.round(ui.panelH)}px</span></div><div class="muted">창 내부의 내용이 길면 내부만 스크롤됩니다.</div></div><div class="box settingshint"><strong>초기화</strong><div class="muted">UI 초기화는 버튼 글자·크기, 창 크기·위치, 테마를 기본값으로 되돌리고 저장된 폴더와 텍스트는 유지합니다.</div><button class="btn" style="margin-top:8px" data-act="resetui">UI 설정 초기화</button></div><div class="box settingshint"><strong>보관함 전체 초기화</strong><div class="muted">저장한 모든 텍스트와 사용자 폴더를 삭제하고 기본 폴더( OOC / 유저 프로필 / 기타 및 OOC의 요약 / 문체 )로 복원합니다. 창·버튼 설정은 그대로 유지됩니다. 실행 전 JSON 백업을 권장합니다.</div><button class="btn danger" style="margin-top:8px" data-act="resetlibrary">보관함 전체 초기화</button></div>`;
     footer.innerHTML=`<button class="btn primary" data-act="savesettings">설정 저장</button><button class="btn" data-act="main">돌아가기</button>`;
   }
   function renderBackup(){
@@ -1027,7 +1030,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
       case 'copyselected':{const values=orderedVisible().filter(e=>selected.has(e.id)).map(e=>e.body);if(values.length){void copyText(values.join('\n\n'));selectionMode=false;selected.clear();render();}return;}
       case 'export':downloadJson();return;
       case 'import':void importJson();return;
-      case 'savesettings':ui.buttonText=sanitizeText($('#button-text')?.value||'📚+',32);ui.buttonSize=asNumber($('#button-size')?.value,48,32,100);persistUi();applyUi();go('main');notify('설정을 저장했습니다.');return;
+      case 'savesettings':ui.buttonText=sanitizeText($('#button-text')?.value||'🗄️',32);ui.buttonSize=asNumber($('#button-size')?.value,48,32,100);persistUi();applyUi();go('main');notify('설정을 저장했습니다.');return;
       case 'resetui':{
         if(!confirm('UI 설정을 초기화할까요?\n버튼 글자·크기, 창 위치·크기 및 테마가 기본값으로 돌아갑니다.\n저장된 폴더와 텍스트는 그대로 유지됩니다.'))return;
         ui=defaultUi();persistUi();applyUi();render();notify('UI 설정을 초기화했습니다.');return;
