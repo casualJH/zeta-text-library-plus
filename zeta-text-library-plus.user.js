@@ -1,14 +1,12 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.2
+// @version      0.1.3
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
 // @match        https://zeta-ai.io/*
 // @match        https://*.zeta-ai.io/*
-// @match        https://m.dcinside.com/*
-// @match        https://gall.dcinside.com/*
 // @match        https://frame.pingpong.ai/*
 // @run-at       document-idle
 // @homepageURL  https://github.com/casualJH/zeta-text-library-plus
@@ -91,7 +89,7 @@
         '<nav class="ztlp-tabs" role="tablist" aria-label="보관함 폴더">'+
         tabs.map(tab=>'<button type="button" role="tab" data-ztlp-tab="'+escapeHTML(tab.id)+'" aria-selected="'+(tab.id===selectedTab?'true':'false')+'">'+escapeHTML(tab.name)+'</button>').join('')+'</nav>'+
         '<div class="ztlp-items">'+
-        (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><span class="ztlp-titleline"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">('+escapeHTML(e.path)+')</small></span><span class="ztlp-excerpt">'+escapeHTML(e.preview||'')+'</span></button>').join(''):
+        (entries.length?entries.map(e=>'<button type="button" data-ztlp-id="'+escapeHTML(e.id)+'"><span class="ztlp-titleline"><strong>'+escapeHTML(e.title)+'</strong><small class="ztlp-path">'+escapeHTML(e.path)+'</small></span><span class="ztlp-excerpt">'+escapeHTML(e.preview||'')+'</span></button>').join(''):
         '<div class="ztlp-empty">이 폴더에 일치하는 텍스트가 없습니다.</div>')+'</div>';
     }
     function fetchSlashResults(el){
@@ -189,7 +187,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -449,6 +447,7 @@ button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
   </section>`;
   const $ = s => root.querySelector(s);
   const launcher=$('#text-library-plus-launcher'), panel=$('#panel'), content=$('#content'), footer=$('#footer');
+  launcher.dataset.jhDockIcon = '🗄️';
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)');
   function applyTheme(){ const dark=ui.theme==='dark' || (ui.theme==='auto' && !!prefersDark?.matches);host.dataset.theme=dark?'dark':'light';const toggle=$('#theme-toggle');if(toggle){toggle.textContent=dark?'☀':'☾';toggle.setAttribute('aria-label',dark?'라이트 모드로 변경':'다크 모드로 변경');toggle.title=dark?'라이트 모드로 변경':'다크 모드로 변경';} }
   prefersDark?.addEventListener?.('change',()=>{if(ui.theme==='auto')applyTheme();});
