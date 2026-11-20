@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         제타 텍스트 보관함+
 // @namespace    zeta-text-library-plus
-// @version      0.1.5
+// @version      0.1.6
 // @updateURL    https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/casualJH/zeta-text-library-plus/main/zeta-text-library-plus.user.js
 // @description  텍스트 보관함과 제타 채팅창 / 단축어 검색·삽입 기능
@@ -31,6 +31,7 @@
     const searchCache=new Map();
     let overlay=null;
     let activeListeners=false;
+    let overlayTouchAt=0;
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const isField=el=>el instanceof HTMLTextAreaElement && el.matches('textarea[name="message"]') && !el.disabled && !el.readOnly;
     function currentPosition(el){
@@ -64,12 +65,17 @@
       });
     }
     function draw(field,entries,folders,theme){
-      if(!field?.isConnected || document.activeElement!==field){dismiss();return;}
+      if(!field?.isConnected || (document.activeElement!==field && Date.now()-overlayTouchAt>700)){dismiss();return;}
       if(!overlay){
         overlay=document.createElement('div');overlay.id=FR;
         overlay.style.cssText='position:fixed;z-index:2147483645;box-sizing:border-box;max-height:min(350px,55dvh);border-radius:13px;box-shadow:0 12px 34px #0007;font:13px/1.5 system-ui,sans-serif;overflow:hidden;';
         document.body.append(overlay);
-        overlay.addEventListener('pointerdown',e=>{if(e.target.closest('[data-ztlp-id],[data-ztlp-tab]'))e.preventDefault();});
+        overlay.addEventListener('pointerdown',e=>{
+          if(!e.target.closest('[data-ztlp-id],[data-ztlp-tab]'))return;
+          overlayTouchAt=Date.now();
+          // iOS Safari may blur the textarea despite preventDefault.
+          if(e.cancelable)e.preventDefault();
+        });
       }
       overlay.dataset.theme=theme==='light'?'light':'dark';
       const box=field.getBoundingClientRect(),width=Math.max(210,Math.min(400,box.width,innerWidth-16));
@@ -196,8 +202,10 @@
     }
     function onMenuFocusout(e){
       if(e.target===activeField)setTimeout(()=>{
+        // A tap on the menu is not a user request to close it.
+        if(Date.now()-overlayTouchAt<700)return;
         if(activeField===e.target&&!overlay?.contains(document.activeElement))dismiss();
-      },150);
+      },180);
     }
     function onMenuCompositionStart(e){
       if(e.target!==activeField)return;
@@ -210,15 +218,24 @@
       // Only resume if an active search exists. New / typed later triggers input.
       if(activeField===e.target)slashSearch(e.target);
     }
-    async function onMenuClick(e){
-      if(!overlay)return;
-      const tab=e.target.closest?.('#'+FR+' [data-ztlp-tab]');
-      if(tab){
-        if(!activeField?.isConnected)return;
+    function selectMenuTab(target){
+      const tab=target?.closest?.('#'+FR+' [data-ztlp-tab]');
+      if(!tab || !overlay || !activeField?.isConnected)return false;
+      overlayTouchAt=Date.now();
+      if(selectedTab!==tab.dataset.ztlpTab){
         selectedTab=tab.dataset.ztlpTab;
         fetchSlashResults(activeField);
-        return;
       }
+      return true;
+    }
+    function onMenuPointerup(e){
+      // Pointer-up handles Safari touch interactions that do not dispatch a
+      // reliable synthetic click after a cancelled pointer-down.
+      selectMenuTab(e.target);
+    }
+    async function onMenuClick(e){
+      if(!overlay)return;
+      if(selectMenuTab(e.target))return;
       const b=e.target.closest?.('#'+FR+' [data-ztlp-id]');if(!b)return;
       const el=activeField,id=b.dataset.ztlpId;
       try{
@@ -233,6 +250,7 @@
     function installMenuListeners(){
       document.addEventListener('keydown',onMenuKeydown,true);
       document.addEventListener('pointerdown',onMenuPointerdown,true);
+      document.addEventListener('pointerup',onMenuPointerup,true);
       document.addEventListener('focusout',onMenuFocusout,true);
       document.addEventListener('compositionstart',onMenuCompositionStart,true);
       document.addEventListener('compositionend',onMenuCompositionEnd,true);
@@ -241,6 +259,7 @@
     function uninstallMenuListeners(){
       document.removeEventListener('keydown',onMenuKeydown,true);
       document.removeEventListener('pointerdown',onMenuPointerdown,true);
+      document.removeEventListener('pointerup',onMenuPointerup,true);
       document.removeEventListener('focusout',onMenuFocusout,true);
       document.removeEventListener('compositionstart',onMenuCompositionStart,true);
       document.removeEventListener('compositionend',onMenuCompositionEnd,true);
@@ -259,7 +278,7 @@
   if (window.top !== window.self) return;
   if (document.getElementById('ztlp-host')) return;
 
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   const DATA_KEY = 'zeta-text-library-plus-data-v1';
   const UI_KEY = 'zeta-text-library-plus-ui-v1';
   const uid = () => 'ztlp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
