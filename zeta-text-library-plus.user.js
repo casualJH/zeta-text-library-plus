@@ -201,7 +201,8 @@
     }
     function onMenuCompositionStart(e){
       if(e.target!==activeField)return;
-      composing=true;dismiss();
+      // Close the menu; subsequent input events rely on e.isComposing rather than stale state.
+      composing=false;dismiss();
     }
     function onMenuCompositionEnd(e){
       if(!isField(e.target))return;
